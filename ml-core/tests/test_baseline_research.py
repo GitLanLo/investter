@@ -9,6 +9,7 @@ from ml_core.training.research import (
     AblationResearchConfig,
     BaselineResearchConfig,
     WalkForwardConfig,
+    _select_production_model_candidate,
     run_ablation_research,
     run_baseline_research,
     run_walk_forward_research,
@@ -33,7 +34,9 @@ def test_run_baseline_research_writes_summary_and_report(tmp_path: Path) -> None
     )
 
     assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
-    assert summary["production_candidate"]["model_name"] == summary["best_model"]
+    assert summary["research_candidate"]["model_name"] == summary["best_model"]
+    assert "selection_mode" in summary["production_candidate"]
+    assert "validation_gate" in summary["production_candidate"]
     assert (
         summary["production_candidate"]["validation"]["actionable_expected_calibration_error"] is None
         or summary["production_candidate"]["validation"]["actionable_expected_calibration_error"] >= 0.0
@@ -69,7 +72,8 @@ def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
     )
 
     assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
-    assert summary["production_candidate"]["model_name"] == summary["best_model"]
+    assert summary["research_candidate"]["model_name"] == summary["best_model"]
+    assert "validation_gate" in summary["production_candidate"]
     assert "actionable_expected_calibration_error" in summary["models"][summary["best_model"]]["walk_forward"]["probability_metrics_mean"]
     assert summary["fold_count"] >= 1
     assert (output_root / "summary.json").exists()
@@ -96,13 +100,78 @@ def test_run_ablation_research_writes_scenario_reports(tmp_path: Path) -> None:
     )
 
     assert summary["best_scenario"] in {"full", "no_cross_asset", "no_regime", "core_price_volume_only"}
-    assert summary["production_candidate"]["scenario_name"] == summary["best_scenario"]
-    assert summary["production_candidate"]["model_name"] == summary["scenarios"][summary["best_scenario"]]["best_model"]
+    assert summary["research_candidate"]["scenario_name"] == summary["best_scenario"]
+    assert "validation_gate" in summary["production_candidate"]
+    assert summary["production_candidate"]["model_name"] == summary["scenarios"][summary["production_candidate"]["scenario_name"]]["best_model"]
     assert (output_root / "summary.json").exists()
     assert (output_root / "report.md").exists()
     assert (output_root / "full" / "summary.json").exists()
     assert (output_root / "no_cross_asset" / "rf_multiclass" / "metrics.json").exists()
     assert (output_root / "no_cross_asset" / "rf_multiclass" / "val_reliability.json").exists()
+
+
+def test_select_production_model_candidate_prefers_gated_model() -> None:
+    results = {
+        "research_best": {
+            "validation": {
+                "metrics": {"macro_f1": 0.35, "balanced_accuracy": 0.36},
+                "signal_metrics": {
+                    "actionable_f1": 0.20,
+                    "precision_actionable_signal": 0.22,
+                    "signal_coverage": 0.32,
+                },
+                "probability_metrics": {"actionable_expected_calibration_error": 0.41},
+            }
+        },
+        "deployable": {
+            "validation": {
+                "metrics": {"macro_f1": 0.33, "balanced_accuracy": 0.34},
+                "signal_metrics": {
+                    "actionable_f1": 0.18,
+                    "precision_actionable_signal": 0.37,
+                    "signal_coverage": 0.11,
+                },
+                "probability_metrics": {"actionable_expected_calibration_error": 0.19},
+            }
+        },
+    }
+
+    candidate_name, gate = _select_production_model_candidate(results, fallback_name="research_best")
+
+    assert candidate_name == "deployable"
+    assert gate["passed"] is True
+
+
+def test_select_production_model_candidate_falls_back_to_research_best() -> None:
+    results = {
+        "research_best": {
+            "validation": {
+                "metrics": {"macro_f1": 0.35, "balanced_accuracy": 0.36},
+                "signal_metrics": {
+                    "actionable_f1": 0.20,
+                    "precision_actionable_signal": 0.22,
+                    "signal_coverage": 0.04,
+                },
+                "probability_metrics": {"actionable_expected_calibration_error": 0.41},
+            }
+        },
+        "also_blocked": {
+            "validation": {
+                "metrics": {"macro_f1": 0.33, "balanced_accuracy": 0.34},
+                "signal_metrics": {
+                    "actionable_f1": 0.18,
+                    "precision_actionable_signal": 0.28,
+                    "signal_coverage": 0.11,
+                },
+                "probability_metrics": {"actionable_expected_calibration_error": 0.31},
+            }
+        },
+    }
+
+    candidate_name, gate = _select_production_model_candidate(results, fallback_name="research_best")
+
+    assert candidate_name == "research_best"
+    assert gate["passed"] is False
 
 
 def _sample_split_df(*, rows: int, start: str) -> pd.DataFrame:

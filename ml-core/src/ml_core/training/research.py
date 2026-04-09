@@ -12,7 +12,7 @@ from ml_core.training.baselines import _classification_metrics, _feature_columns
 
 DEFAULT_THRESHOLD_GRID = (0.55, 0.6, 0.65, 0.7, 0.75, 0.8)
 DEFAULT_CALIBRATION_BINS = 8
-PRODUCTION_CANDIDATE_POLICY = {
+RESEARCH_CANDIDATE_POLICY = {
     "selection_basis": "validation_only",
     "ranking": [
         "validation.signal_metrics.actionable_f1",
@@ -22,6 +22,23 @@ PRODUCTION_CANDIDATE_POLICY = {
         "validation.signal_metrics.signal_coverage",
     ],
     "calibration_scope": "actionable directional probabilities at the selected threshold",
+    "test_usage": "audit_only",
+}
+PRODUCTION_CANDIDATE_POLICY = {
+    "selection_basis": "validation_only_gated",
+    "hard_gates": {
+        "validation.signal_metrics.precision_actionable_signal_min": 0.30,
+        "validation.signal_metrics.signal_coverage_min": 0.05,
+        "validation.probability_metrics.actionable_expected_calibration_error_max": 0.30,
+    },
+    "ranking": [
+        "validation.signal_metrics.actionable_f1",
+        "validation.signal_metrics.precision_actionable_signal",
+        "validation.metrics.macro_f1",
+        "validation.signal_metrics.signal_coverage",
+        "validation.probability_metrics.actionable_expected_calibration_error_lower_is_better",
+    ],
+    "fallback": "research_candidate_if_none_pass",
     "test_usage": "audit_only",
 }
 
@@ -93,14 +110,26 @@ def run_baseline_research(
         calibration_bins=config.calibration_bins,
     )
     best_model_name = _best_model_name(results)
+    production_model_name, production_gate = _select_production_model_candidate(results, fallback_name=best_model_name)
     summary = {
         "model_group": config.model_group,
         "feature_columns": feature_columns,
         "decision_threshold": config.decision_threshold,
         "dataset_root": str(dataset_root),
         "best_model": best_model_name,
+        "research_candidate_policy": RESEARCH_CANDIDATE_POLICY,
+        "research_candidate": _build_model_candidate_summary(
+            best_model_name,
+            results[best_model_name],
+            selection_mode="research_candidate",
+        ),
         "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
-        "production_candidate": _build_model_candidate_summary(best_model_name, results[best_model_name]),
+        "production_candidate": _build_model_candidate_summary(
+            production_model_name,
+            results[production_model_name],
+            selection_mode="production_candidate" if production_gate["passed"] else "fallback_research_candidate",
+            validation_gate=production_gate,
+        ),
         "models": results,
     }
     (config.output_root / "summary.json").write_text(
@@ -165,14 +194,29 @@ def run_ablation_research(
         scenario_summaries[scenario_name] = scenario_summary
 
     best_scenario_name = _best_scenario_name(scenario_summaries)
+    production_scenario_name, production_gate = _select_production_scenario_candidate(
+        scenario_summaries,
+        fallback_name=best_scenario_name,
+    )
     summary = {
         "model_group": config.model_group,
         "dataset_root": str(dataset_root),
         "decision_threshold": config.decision_threshold,
         "scenario_count": len(scenario_summaries),
         "best_scenario": best_scenario_name,
+        "research_candidate_policy": RESEARCH_CANDIDATE_POLICY,
+        "research_candidate": _build_ablation_candidate_summary(
+            best_scenario_name,
+            scenario_summaries[best_scenario_name],
+            selection_mode="research_candidate",
+        ),
         "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
-        "production_candidate": _build_ablation_candidate_summary(best_scenario_name, scenario_summaries[best_scenario_name]),
+        "production_candidate": _build_ablation_candidate_summary(
+            production_scenario_name,
+            scenario_summaries[production_scenario_name],
+            selection_mode="production_candidate" if production_gate["passed"] else "fallback_research_candidate",
+            validation_gate=production_gate,
+        ),
         "scenarios": scenario_summaries,
     }
     (config.output_root / "summary.json").write_text(
@@ -374,13 +418,28 @@ def run_walk_forward_research(
         results[model_name] = report
 
     best_model_name = _best_walk_forward_model_name(results)
+    production_model_name, production_gate = _select_production_walk_forward_candidate(
+        results,
+        fallback_name=best_model_name,
+    )
     summary = {
         "model_group": config.model_group,
         "dataset_root": str(dataset_root),
         "decision_threshold": config.decision_threshold,
         "best_model": best_model_name,
+        "research_candidate_policy": RESEARCH_CANDIDATE_POLICY,
+        "research_candidate": _build_walk_forward_candidate_summary(
+            best_model_name,
+            results[best_model_name],
+            selection_mode="research_candidate",
+        ),
         "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
-        "production_candidate": _build_walk_forward_candidate_summary(best_model_name, results[best_model_name]),
+        "production_candidate": _build_walk_forward_candidate_summary(
+            production_model_name,
+            results[production_model_name],
+            selection_mode="production_candidate" if production_gate["passed"] else "fallback_research_candidate",
+            validation_gate=production_gate,
+        ),
         "fold_count": len(folds),
         "fold_config": {
             "initial_train_ratio": config.initial_train_ratio,
@@ -917,9 +976,16 @@ def _best_model_name(results: dict[str, dict]) -> str:
     )
 
 
-def _build_model_candidate_summary(model_name: str, report: dict) -> dict:
-    return {
+def _build_model_candidate_summary(
+    model_name: str,
+    report: dict,
+    *,
+    selection_mode: str,
+    validation_gate: dict | None = None,
+) -> dict:
+    summary = {
         "model_name": model_name,
+        "selection_mode": selection_mode,
         "selected_threshold": report.get("selected_threshold", report.get("decision_threshold")),
         "validation": {
             "macro_f1": report["validation"]["metrics"].get("macro_f1", 0.0),
@@ -942,6 +1008,9 @@ def _build_model_candidate_summary(model_name: str, report: dict) -> dict:
             ),
         },
     }
+    if validation_gate is not None:
+        summary["validation_gate"] = validation_gate
+    return summary
 
 
 def _best_scenario_name(results: dict[str, dict]) -> str:
@@ -961,10 +1030,21 @@ def _best_scenario_name(results: dict[str, dict]) -> str:
     )
 
 
-def _build_ablation_candidate_summary(scenario_name: str, scenario_summary: dict) -> dict:
+def _build_ablation_candidate_summary(
+    scenario_name: str,
+    scenario_summary: dict,
+    *,
+    selection_mode: str,
+    validation_gate: dict | None = None,
+) -> dict:
     best_model = scenario_summary["best_model"]
     report = scenario_summary["models"][best_model]
-    candidate = _build_model_candidate_summary(best_model, report)
+    candidate = _build_model_candidate_summary(
+        best_model,
+        report,
+        selection_mode=selection_mode,
+        validation_gate=validation_gate,
+    )
     return {
         "scenario_name": scenario_name,
         "feature_count": scenario_summary["feature_count"],
@@ -990,10 +1070,17 @@ def _best_walk_forward_model_name(results: dict[str, dict]) -> str:
     )
 
 
-def _build_walk_forward_candidate_summary(model_name: str, report: dict) -> dict:
+def _build_walk_forward_candidate_summary(
+    model_name: str,
+    report: dict,
+    *,
+    selection_mode: str,
+    validation_gate: dict | None = None,
+) -> dict:
     aggregate = report["walk_forward"]
-    return {
+    summary = {
         "model_name": model_name,
+        "selection_mode": selection_mode,
         "selected_threshold": report.get("decision_threshold"),
         "validation_mean": {
             "macro_f1": aggregate["validation_metrics_mean"].get("macro_f1", 0.0),
@@ -1015,6 +1102,136 @@ def _build_walk_forward_candidate_summary(model_name: str, report: dict) -> dict
                 "actionable_expected_calibration_error"
             ),
         },
+    }
+    if validation_gate is not None:
+        summary["validation_gate"] = validation_gate
+    return summary
+
+
+def _select_production_model_candidate(
+    results: dict[str, dict],
+    *,
+    fallback_name: str,
+) -> tuple[str, dict]:
+    passing = {name: report for name, report in results.items() if _model_production_gate(report)["passed"]}
+    if passing:
+        selected_name = max(passing, key=lambda name: _production_model_rank(results[name]))
+        return selected_name, _model_production_gate(results[selected_name])
+    return fallback_name, _model_production_gate(results[fallback_name])
+
+
+def _select_production_scenario_candidate(
+    results: dict[str, dict],
+    *,
+    fallback_name: str,
+) -> tuple[str, dict]:
+    passing = {
+        name: scenario
+        for name, scenario in results.items()
+        if _model_production_gate(scenario["models"][scenario["best_model"]])["passed"]
+    }
+    if passing:
+        selected_name = max(
+            passing,
+            key=lambda name: _production_model_rank(
+                results[name]["models"][results[name]["best_model"]]
+            ),
+        )
+        selected_report = results[selected_name]["models"][results[selected_name]["best_model"]]
+        return selected_name, _model_production_gate(selected_report)
+    fallback_report = results[fallback_name]["models"][results[fallback_name]["best_model"]]
+    return fallback_name, _model_production_gate(fallback_report)
+
+
+def _select_production_walk_forward_candidate(
+    results: dict[str, dict],
+    *,
+    fallback_name: str,
+) -> tuple[str, dict]:
+    passing = {
+        name: report
+        for name, report in results.items()
+        if _walk_forward_production_gate(report)["passed"]
+    }
+    if passing:
+        selected_name = max(passing, key=lambda name: _production_walk_forward_rank(results[name]))
+        return selected_name, _walk_forward_production_gate(results[selected_name])
+    return fallback_name, _walk_forward_production_gate(results[fallback_name])
+
+
+def _production_model_rank(report: dict) -> tuple[float, float, float, float, float]:
+    return (
+        report["validation"]["signal_metrics"].get("actionable_f1", 0.0),
+        report["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+        report["validation"]["metrics"].get("macro_f1", 0.0),
+        report["validation"]["signal_metrics"].get("signal_coverage", 0.0),
+        -_none_safe(report["validation"]["probability_metrics"].get("actionable_expected_calibration_error")),
+    )
+
+
+def _production_walk_forward_rank(report: dict) -> tuple[float, float, float, float, float]:
+    aggregate = report["walk_forward"]
+    return (
+        aggregate["signal_metrics_mean"].get("actionable_f1", 0.0),
+        aggregate["signal_metrics_mean"].get("precision_actionable_signal", 0.0),
+        aggregate["validation_metrics_mean"].get("macro_f1", 0.0),
+        aggregate["signal_metrics_mean"].get("signal_coverage", 0.0),
+        -_none_safe(aggregate["probability_metrics_mean"].get("actionable_expected_calibration_error")),
+    )
+
+
+def _model_production_gate(report: dict) -> dict:
+    return _build_validation_gate(
+        precision=report["validation"]["signal_metrics"].get("precision_actionable_signal"),
+        coverage=report["validation"]["signal_metrics"].get("signal_coverage"),
+        actionable_ece=report["validation"]["probability_metrics"].get("actionable_expected_calibration_error"),
+    )
+
+
+def _walk_forward_production_gate(report: dict) -> dict:
+    aggregate = report["walk_forward"]
+    return _build_validation_gate(
+        precision=aggregate["signal_metrics_mean"].get("precision_actionable_signal"),
+        coverage=aggregate["signal_metrics_mean"].get("signal_coverage"),
+        actionable_ece=aggregate["probability_metrics_mean"].get("actionable_expected_calibration_error"),
+    )
+
+
+def _build_validation_gate(
+    *,
+    precision: float | None,
+    coverage: float | None,
+    actionable_ece: float | None,
+) -> dict:
+    precision_threshold = PRODUCTION_CANDIDATE_POLICY["hard_gates"][
+        "validation.signal_metrics.precision_actionable_signal_min"
+    ]
+    coverage_threshold = PRODUCTION_CANDIDATE_POLICY["hard_gates"][
+        "validation.signal_metrics.signal_coverage_min"
+    ]
+    ece_threshold = PRODUCTION_CANDIDATE_POLICY["hard_gates"][
+        "validation.probability_metrics.actionable_expected_calibration_error_max"
+    ]
+    checks = {
+        "precision_actionable_signal": {
+            "actual": precision,
+            "required_min": precision_threshold,
+            "passed": precision is not None and float(precision) >= float(precision_threshold),
+        },
+        "signal_coverage": {
+            "actual": coverage,
+            "required_min": coverage_threshold,
+            "passed": coverage is not None and float(coverage) >= float(coverage_threshold),
+        },
+        "actionable_expected_calibration_error": {
+            "actual": actionable_ece,
+            "required_max": ece_threshold,
+            "passed": actionable_ece is not None and float(actionable_ece) <= float(ece_threshold),
+        },
+    }
+    return {
+        "passed": all(check["passed"] for check in checks.values()),
+        "checks": checks,
     }
 
 
@@ -1121,9 +1338,11 @@ def render_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_model: `{summary['best_model']}`",
+        f"- research_candidate: `{summary['research_candidate']['model_name']}`",
         f"- production_candidate: `{summary['production_candidate']['model_name']}`",
-        f"- candidate val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
-        f"- candidate val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
+        f"- production_gate_passed: `{summary['production_candidate']['validation_gate']['passed']}`",
+        f"- production val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
+        f"- production val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
         "",
         "## Models",
         "",
@@ -1132,11 +1351,13 @@ def render_markdown_report(summary: dict) -> str:
     for model_name, report in summary["models"].items():
         val = report["validation"]
         test = report["test"]
+        gate = _model_production_gate(report)
         lines.extend(
             [
                 f"### {model_name}",
                 "",
                 f"- selected_threshold: `{report.get('selected_threshold', report['decision_threshold']):.2f}`",
+                f"- production_gate_passed: `{gate['passed']}`",
                 f"- val macro_f1: `{val['metrics'].get('macro_f1', 0):.4f}`",
                 f"- val balanced_accuracy: `{val['metrics'].get('balanced_accuracy', 0):.4f}`",
                 f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
@@ -1162,9 +1383,11 @@ def render_ablation_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_scenario: `{summary['best_scenario']}`",
+        f"- research_candidate: `{summary['research_candidate']['scenario_name']} / {summary['research_candidate']['model_name']}`",
         f"- production_candidate: `{summary['production_candidate']['scenario_name']} / {summary['production_candidate']['model_name']}`",
-        f"- candidate val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
-        f"- candidate val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
+        f"- production_gate_passed: `{summary['production_candidate']['validation_gate']['passed']}`",
+        f"- production val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
+        f"- production val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
         "",
         "## Scenarios",
         "",
@@ -1174,6 +1397,7 @@ def render_ablation_markdown_report(summary: dict) -> str:
         best_model = scenario["best_model"]
         report = scenario["models"][best_model]
         val = report["validation"]
+        gate = _model_production_gate(report)
         lines.extend(
             [
                 f"### {scenario_name}",
@@ -1181,6 +1405,7 @@ def render_ablation_markdown_report(summary: dict) -> str:
                 f"- feature_count: `{scenario['feature_count']}`",
                 f"- best_model: `{best_model}`",
                 f"- selected_threshold: `{report.get('selected_threshold', report['decision_threshold']):.2f}`",
+                f"- production_gate_passed: `{gate['passed']}`",
                 f"- val macro_f1: `{val['metrics'].get('macro_f1', 0):.4f}`",
                 f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- val signal_coverage: `{val['signal_metrics'].get('signal_coverage', 0):.4f}`",
@@ -1200,9 +1425,11 @@ def render_walk_forward_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_model: `{summary['best_model']}`",
+        f"- research_candidate: `{summary['research_candidate']['model_name']}`",
         f"- production_candidate: `{summary['production_candidate']['model_name']}`",
-        f"- candidate mean actionable_f1: `{summary['production_candidate']['validation_mean']['actionable_f1']:.4f}`",
-        f"- candidate mean actionable_ece: `{_format_metric(summary['production_candidate']['validation_mean']['actionable_expected_calibration_error'])}`",
+        f"- production_gate_passed: `{summary['production_candidate']['validation_gate']['passed']}`",
+        f"- production mean actionable_f1: `{summary['production_candidate']['validation_mean']['actionable_f1']:.4f}`",
+        f"- production mean actionable_ece: `{_format_metric(summary['production_candidate']['validation_mean']['actionable_expected_calibration_error'])}`",
         f"- fold_count: `{summary['fold_count']}`",
         "",
         "## Models",
@@ -1211,10 +1438,12 @@ def render_walk_forward_markdown_report(summary: dict) -> str:
 
     for model_name, report in summary["models"].items():
         aggregate = report["walk_forward"]
+        gate = _walk_forward_production_gate(report)
         lines.extend(
             [
                 f"### {model_name}",
                 "",
+                f"- production_gate_passed: `{gate['passed']}`",
                 f"- mean macro_f1: `{aggregate['validation_metrics_mean'].get('macro_f1', 0):.4f}`",
                 f"- mean balanced_accuracy: `{aggregate['validation_metrics_mean'].get('balanced_accuracy', 0):.4f}`",
                 f"- mean actionable_f1: `{aggregate['signal_metrics_mean'].get('actionable_f1', 0):.4f}`",

@@ -56,14 +56,17 @@ def test_run_research_pipeline_materializes_dataset_and_report(tmp_path: Path) -
 
     assert summary["dataset_version"] == "pipeline_v1"
     assert summary["research_summary"]["best_model"] in {"logreg_multiclass", "rf_multiclass"}
-    assert summary["research_summary"]["production_candidate"]["model_name"] == summary["research_summary"]["best_model"]
+    assert summary["research_summary"]["research_candidate"]["model_name"] == summary["research_summary"]["best_model"]
+    assert "validation_gate" in summary["research_summary"]["production_candidate"]
     assert summary["walk_forward_summary"] is not None
-    assert summary["walk_forward_summary"]["production_candidate"]["model_name"] == summary["walk_forward_summary"]["best_model"]
+    assert summary["walk_forward_summary"]["research_candidate"]["model_name"] == summary["walk_forward_summary"]["best_model"]
+    assert "validation_gate" in summary["walk_forward_summary"]["production_candidate"]
     assert (dataset_output_root / "dataset_version=pipeline_v1" / "manifest.json").exists()
     assert (research_output_root / "summary.json").exists()
     assert (research_output_root / "report.md").exists()
     assert (research_output_root / "pipeline_summary.json").exists()
     assert (research_output_root / "walk_forward" / "summary.json").exists()
     assert summary["ablation_summary"] is not None
-    assert summary["ablation_summary"]["production_candidate"]["scenario_name"] == summary["ablation_summary"]["best_scenario"]
+    assert summary["ablation_summary"]["research_candidate"]["scenario_name"] == summary["ablation_summary"]["best_scenario"]
+    assert "validation_gate" in summary["ablation_summary"]["production_candidate"]
     assert (research_output_root / "ablation" / "summary.json").exists()
