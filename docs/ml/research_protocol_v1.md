@@ -16,6 +16,8 @@
 
 - frozen `train/val/test` report для финального holdout сравнения;
 - отдельный walk-forward report по `train+val` истории для устойчивости модели по rolling folds.
+- отдельный ablation report с сериями `full`, `no_cross_asset`, `no_regime`, `core_price_volume_only`;
+- validation-only threshold tuning с сохранением выбранного threshold в research artifacts.
 
 Обязательные правила:
 

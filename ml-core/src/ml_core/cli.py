@@ -20,8 +20,11 @@ from ml_core.pipelines.research import ResearchPipelineConfig, run_research_pipe
 from ml_core.storage.layouts import ingest_asset_frame, ingest_factor_frame
 from ml_core.training.baselines import BaselineTrainingConfig, train_baseline_pack
 from ml_core.training.research import (
+    AblationResearchConfig,
     BaselineResearchConfig,
+    DEFAULT_THRESHOLD_GRID,
     WalkForwardConfig,
+    run_ablation_research,
     run_baseline_research,
     run_walk_forward_research,
 )
@@ -74,6 +77,12 @@ def main() -> None:
     run_walk_forward.add_argument("--min-validation-timestamps", type=int, default=24)
     run_walk_forward.add_argument("--max-folds", type=int, default=6)
 
+    run_ablation = subparsers.add_parser("run-ablation-research")
+    run_ablation.add_argument("--dataset-root", required=True)
+    run_ablation.add_argument("--output-root", required=True)
+    run_ablation.add_argument("--decision-threshold", type=float, default=0.65)
+    run_ablation.add_argument("--threshold", action="append", type=float, default=[])
+
     run_research_pipeline_cmd = subparsers.add_parser("run-research-pipeline")
     run_research_pipeline_cmd.add_argument("--data-root", required=True)
     run_research_pipeline_cmd.add_argument("--dataset-output-root", required=True)
@@ -96,6 +105,8 @@ def main() -> None:
     run_research_pipeline_cmd.add_argument("--wf-validation-ratio", type=float, default=0.1)
     run_research_pipeline_cmd.add_argument("--wf-step-ratio", type=float, default=0.05)
     run_research_pipeline_cmd.add_argument("--wf-max-folds", type=int, default=6)
+    run_research_pipeline_cmd.add_argument("--run-ablation", action="store_true")
+    run_research_pipeline_cmd.add_argument("--ablation-threshold", action="append", type=float, default=[])
 
     ingest_asset = subparsers.add_parser("ingest-asset-parquet")
     ingest_asset.add_argument("--input-parquet", required=True)
@@ -249,8 +260,22 @@ def main() -> None:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         return
 
+    if args.command == "run-ablation-research":
+        threshold_grid = tuple(args.threshold) if args.threshold else DEFAULT_THRESHOLD_GRID
+        summary = run_ablation_research(
+            Path(args.dataset_root),
+            config=AblationResearchConfig(
+                output_root=Path(args.output_root),
+                decision_threshold=args.decision_threshold,
+                threshold_grid=threshold_grid,
+            ),
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+        return
+
     if args.command == "run-research-pipeline":
         provider = LocalParquetProvider(root=Path(args.data_root))
+        ablation_thresholds = tuple(args.ablation_threshold) if args.ablation_threshold else DEFAULT_THRESHOLD_GRID
         summary = run_research_pipeline(
             provider,
             config=ResearchPipelineConfig(
@@ -289,6 +314,12 @@ def main() -> None:
                     step_ratio=args.wf_step_ratio,
                     purge_gap_bars=args.purge_gap_bars,
                     max_folds=args.wf_max_folds,
+                ),
+                run_ablation=args.run_ablation,
+                ablation_config=AblationResearchConfig(
+                    output_root=Path(args.research_output_root) / "ablation",
+                    decision_threshold=args.decision_threshold,
+                    threshold_grid=ablation_thresholds,
                 ),
             ),
         )

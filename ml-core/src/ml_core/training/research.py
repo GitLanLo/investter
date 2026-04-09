@@ -10,6 +10,8 @@ import pandas as pd
 
 from ml_core.training.baselines import _classification_metrics, _feature_columns, _model_pack
 
+DEFAULT_THRESHOLD_GRID = (0.55, 0.6, 0.65, 0.7, 0.75, 0.8)
+
 
 @dataclass(slots=True)
 class BaselineResearchConfig:
@@ -17,6 +19,17 @@ class BaselineResearchConfig:
     model_group: str = "baseline_research_v1"
     random_state: int = 42
     decision_threshold: float = 0.65
+    tune_decision_threshold: bool = True
+    threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID
+
+
+@dataclass(slots=True)
+class AblationResearchConfig:
+    output_root: Path
+    model_group: str = "ablation_research_v1"
+    random_state: int = 42
+    decision_threshold: float = 0.65
+    threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID
 
 
 @dataclass(slots=True)
@@ -51,64 +64,18 @@ def run_baseline_research(
         raise ValueError("no feature columns found for research run")
 
     config.output_root.mkdir(parents=True, exist_ok=True)
-    results: dict[str, dict] = {}
-
-    x_train = train_df[feature_columns]
-    y_train = train_df["label_class"].astype(str)
-
-    for model_name, pipeline in _model_pack(config.random_state).items():
-        pipeline.fit(x_train, y_train)
-        model_dir = config.output_root / model_name
-        model_dir.mkdir(parents=True, exist_ok=True)
-
-        with (model_dir / "model.pkl").open("wb") as fh:
-            pickle.dump(pipeline, fh)
-
-        val_result = evaluate_split(
-            pipeline,
-            split_df=val_df,
-            feature_columns=feature_columns,
-            split_name="val",
-            decision_threshold=config.decision_threshold,
-        )
-        test_result = evaluate_split(
-            pipeline,
-            split_df=test_df,
-            feature_columns=feature_columns,
-            split_name="test",
-            decision_threshold=config.decision_threshold,
-        )
-
-        val_result["predictions"].to_parquet(model_dir / "val_predictions.parquet", index=False)
-        test_result["predictions"].to_parquet(model_dir / "test_predictions.parquet", index=False)
-
-        importance = compute_feature_importance(
-            pipeline.named_steps["model"],
-            feature_columns=feature_columns,
-        )
-        importance.to_csv(model_dir / "feature_importance.csv", index=False)
-
-        report = {
-            "model_name": model_name,
-            "feature_columns": feature_columns,
-            "decision_threshold": config.decision_threshold,
-            "validation": val_result["summary"],
-            "test": test_result["summary"],
-            "top_feature_importance": importance.head(20).to_dict(orient="records"),
-        }
-        (model_dir / "metrics.json").write_text(
-            json.dumps(report, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        results[model_name] = report
-
-    best_model_name = max(
-        results,
-        key=lambda name: (
-            results[name]["validation"]["metrics"]["macro_f1"],
-            results[name]["validation"]["metrics"]["balanced_accuracy"],
-        ),
+    results = _run_model_suite(
+        train_df=train_df,
+        val_df=val_df,
+        test_df=test_df,
+        feature_columns=feature_columns,
+        output_root=config.output_root,
+        random_state=config.random_state,
+        decision_threshold=config.decision_threshold,
+        tune_decision_threshold=config.tune_decision_threshold,
+        threshold_grid=config.threshold_grid,
     )
+    best_model_name = _best_model_name(results)
     summary = {
         "model_group": config.model_group,
         "feature_columns": feature_columns,
@@ -126,6 +93,159 @@ def run_baseline_research(
         encoding="utf-8",
     )
     return summary
+
+
+def run_ablation_research(
+    dataset_root: Path,
+    *,
+    config: AblationResearchConfig,
+) -> dict:
+    train_df = load_dataset_split(dataset_root, "train")
+    val_df = load_dataset_split(dataset_root, "val")
+    test_df = load_dataset_split(dataset_root, "test")
+
+    if train_df.empty or val_df.empty:
+        raise ValueError("train and val splits must be non-empty")
+
+    full_feature_columns = _feature_columns(train_df)
+    if not full_feature_columns:
+        raise ValueError("no feature columns found for ablation run")
+
+    scenarios = build_feature_ablation_scenarios(full_feature_columns)
+    config.output_root.mkdir(parents=True, exist_ok=True)
+
+    scenario_summaries: dict[str, dict] = {}
+    for scenario_name, scenario_feature_columns in scenarios.items():
+        scenario_output_root = config.output_root / scenario_name
+        scenario_output_root.mkdir(parents=True, exist_ok=True)
+
+        results = _run_model_suite(
+            train_df=train_df,
+            val_df=val_df,
+            test_df=test_df,
+            feature_columns=scenario_feature_columns,
+            output_root=scenario_output_root,
+            random_state=config.random_state,
+            decision_threshold=config.decision_threshold,
+            tune_decision_threshold=True,
+            threshold_grid=config.threshold_grid,
+        )
+        best_model_name = _best_model_name(results)
+        scenario_summary = {
+            "scenario_name": scenario_name,
+            "feature_columns": scenario_feature_columns,
+            "feature_count": len(scenario_feature_columns),
+            "best_model": best_model_name,
+            "models": results,
+        }
+        (scenario_output_root / "summary.json").write_text(
+            json.dumps(scenario_summary, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        scenario_summaries[scenario_name] = scenario_summary
+
+    best_scenario_name = _best_scenario_name(scenario_summaries)
+    summary = {
+        "model_group": config.model_group,
+        "dataset_root": str(dataset_root),
+        "decision_threshold": config.decision_threshold,
+        "scenario_count": len(scenario_summaries),
+        "best_scenario": best_scenario_name,
+        "scenarios": scenario_summaries,
+    }
+    (config.output_root / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (config.output_root / "report.md").write_text(
+        render_ablation_markdown_report(summary),
+        encoding="utf-8",
+    )
+    return summary
+
+
+def _run_model_suite(
+    *,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    feature_columns: list[str],
+    output_root: Path,
+    random_state: int,
+    decision_threshold: float,
+    tune_decision_threshold: bool,
+    threshold_grid: tuple[float, ...],
+) -> dict[str, dict]:
+    results: dict[str, dict] = {}
+    x_train = train_df[feature_columns]
+    y_train = train_df["label_class"].astype(str)
+
+    for model_name, pipeline in _model_pack(random_state).items():
+        pipeline.fit(x_train, y_train)
+        model_dir = output_root / model_name
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        with (model_dir / "model.pkl").open("wb") as fh:
+            pickle.dump(pipeline, fh)
+
+        val_predictions, classes = build_prediction_frame(
+            pipeline,
+            split_df=val_df,
+            feature_columns=feature_columns,
+        )
+        threshold_tuning = tune_threshold_from_validation(
+            val_predictions,
+            classes=classes,
+            default_threshold=decision_threshold,
+            threshold_grid=threshold_grid,
+            enabled=tune_decision_threshold,
+        )
+        selected_threshold = float(threshold_tuning["selected_threshold"])
+
+        val_result = summarize_prediction_frame(
+            val_predictions,
+            split_name="val",
+            classes=classes,
+            decision_threshold=selected_threshold,
+        )
+        test_predictions, _ = build_prediction_frame(
+            pipeline,
+            split_df=test_df,
+            feature_columns=feature_columns,
+        )
+        test_result = summarize_prediction_frame(
+            test_predictions,
+            split_name="test",
+            classes=classes,
+            decision_threshold=selected_threshold,
+        )
+
+        val_result["predictions"].to_parquet(model_dir / "val_predictions.parquet", index=False)
+        test_result["predictions"].to_parquet(model_dir / "test_predictions.parquet", index=False)
+
+        importance = compute_feature_importance(
+            pipeline.named_steps["model"],
+            feature_columns=feature_columns,
+        )
+        importance.to_csv(model_dir / "feature_importance.csv", index=False)
+
+        report = {
+            "model_name": model_name,
+            "feature_columns": feature_columns,
+            "decision_threshold": decision_threshold,
+            "selected_threshold": selected_threshold,
+            "threshold_tuning": threshold_tuning,
+            "validation": val_result["summary"],
+            "test": test_result["summary"],
+            "top_feature_importance": importance.head(20).to_dict(orient="records"),
+        }
+        (model_dir / "metrics.json").write_text(
+            json.dumps(report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        results[model_name] = report
+
+    return results
 
 
 def run_walk_forward_research(
@@ -351,23 +471,34 @@ def evaluate_split(
     split_name: str,
     decision_threshold: float,
 ) -> dict:
+    predictions, classes = build_prediction_frame(
+        pipeline,
+        split_df=split_df,
+        feature_columns=feature_columns,
+    )
+    return summarize_prediction_frame(
+        predictions,
+        split_name=split_name,
+        classes=classes,
+        decision_threshold=decision_threshold,
+    )
+
+
+def build_prediction_frame(
+    pipeline,
+    *,
+    split_df: pd.DataFrame,
+    feature_columns: list[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    classes = list(pipeline.named_steps["model"].classes_)
     if split_df.empty:
-        return {
-            "summary": {
-                "split_name": split_name,
-                "rows": 0,
-                "metrics": {},
-                "signal_metrics": {},
-                "per_ticker": {},
-            },
-            "predictions": pd.DataFrame(),
-        }
+        columns = ["timestamp", "ticker", "label_class", "pred_class", *[f"prob_{cls}" for cls in classes]]
+        return pd.DataFrame(columns=columns), classes
 
     x = split_df[feature_columns]
     y_true = split_df["label_class"].astype(str)
     pred = pipeline.predict(x)
     prob = pipeline.predict_proba(x)
-    classes = list(pipeline.named_steps["model"].classes_)
 
     predictions = pd.DataFrame(
         {
@@ -379,6 +510,27 @@ def evaluate_split(
     )
     for idx, cls in enumerate(classes):
         predictions[f"prob_{cls}"] = prob[:, idx]
+    return predictions, classes
+
+
+def summarize_prediction_frame(
+    predictions: pd.DataFrame,
+    *,
+    split_name: str,
+    classes: list[str],
+    decision_threshold: float,
+) -> dict:
+    if predictions.empty:
+        return {
+            "summary": {
+                "split_name": split_name,
+                "rows": 0,
+                "metrics": {},
+                "signal_metrics": {},
+                "per_ticker": {},
+            },
+            "predictions": predictions,
+        }
 
     signal_metrics = compute_signal_metrics(
         predictions,
@@ -394,8 +546,11 @@ def evaluate_split(
     return {
         "summary": {
             "split_name": split_name,
-            "rows": int(len(split_df)),
-            "metrics": _classification_metrics(y_true, pred),
+            "rows": int(len(predictions)),
+            "metrics": _classification_metrics(
+                predictions["label_class"].astype(str),
+                predictions["pred_class"].astype(str).to_numpy(),
+            ),
             "signal_metrics": signal_metrics,
             "per_ticker": per_ticker,
         },
@@ -423,11 +578,13 @@ def compute_signal_metrics(
     coverage = actionable_count / len(predictions) if len(predictions) else 0.0
     precision = actionable_correct_count / actionable_count if actionable_count else 0.0
     recall = actionable_correct_count / true_directional_count if true_directional_count else 0.0
+    actionable_f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
 
     return {
         "signal_coverage": float(coverage),
         "precision_actionable_signal": float(precision),
         "recall_actionable_signal": float(recall),
+        "actionable_f1": float(actionable_f1),
         "directional_hit_rate": float(precision),
         "actionable_count": actionable_count,
     }
@@ -452,6 +609,75 @@ def compute_per_ticker_metrics(
     return result
 
 
+def tune_threshold_from_validation(
+    predictions: pd.DataFrame,
+    *,
+    classes: list[str],
+    default_threshold: float,
+    threshold_grid: tuple[float, ...],
+    enabled: bool,
+) -> dict:
+    if predictions.empty or not enabled:
+        return {
+            "enabled": enabled,
+            "default_threshold": float(default_threshold),
+            "selected_threshold": float(default_threshold),
+            "candidates": [],
+        }
+
+    candidates = sorted({float(value) for value in threshold_grid if 0.0 < float(value) <= 1.0})
+    if not candidates:
+        candidates = [float(default_threshold)]
+
+    candidate_reports: list[dict] = []
+    best_threshold = float(default_threshold)
+    best_rank: tuple[float, float, float, float, float] | None = None
+    for threshold in candidates:
+        signal_metrics = compute_signal_metrics(
+            predictions,
+            classes=classes,
+            decision_threshold=float(threshold),
+        )
+        candidate_report = {
+            "threshold": float(threshold),
+            **signal_metrics,
+        }
+        candidate_reports.append(candidate_report)
+
+        rank = (
+            signal_metrics.get("actionable_f1", 0.0),
+            signal_metrics.get("precision_actionable_signal", 0.0),
+            signal_metrics.get("recall_actionable_signal", 0.0),
+            signal_metrics.get("signal_coverage", 0.0),
+            -abs(float(threshold) - float(default_threshold)),
+        )
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best_threshold = float(threshold)
+
+    selected_metrics = next(
+        (item for item in candidate_reports if item["threshold"] == best_threshold),
+        {},
+    )
+    return {
+        "enabled": True,
+        "default_threshold": float(default_threshold),
+        "selected_threshold": best_threshold,
+        "selected_metrics": selected_metrics,
+        "candidates": candidate_reports,
+    }
+
+
+def build_feature_ablation_scenarios(feature_columns: list[str]) -> dict[str, list[str]]:
+    scenarios = {
+        "full": list(feature_columns),
+        "no_cross_asset": [col for col in feature_columns if not _is_cross_asset_feature(col)],
+        "no_regime": [col for col in feature_columns if not _is_regime_feature(col)],
+        "core_price_volume_only": [col for col in feature_columns if _is_core_price_volume_feature(col)],
+    }
+    return {name: columns for name, columns in scenarios.items() if columns}
+
+
 def actionable_signal_mask(
     predictions: pd.DataFrame,
     *,
@@ -472,6 +698,57 @@ def actionable_signal_mask(
     )
     actionable = (winning_class != "no_trade") & (directional_prob >= decision_threshold)
     return pd.Series(actionable), pd.Series(predicted_direction)
+
+
+def _is_cross_asset_feature(feature_name: str) -> bool:
+    prefixes = ("usdrub_", "brent_", "rtsi_")
+    return (
+        feature_name.startswith(prefixes)
+        or feature_name.startswith("asset_vs_")
+        or feature_name in {"market_stress_proxy", "cross_asset_dispersion_proxy"}
+    )
+
+
+def _is_regime_feature(feature_name: str) -> bool:
+    return feature_name in {
+        "vol_regime_flag",
+        "trend_regime_flag",
+        "market_stress_proxy",
+        "cross_asset_dispersion_proxy",
+    }
+
+
+def _is_core_price_volume_feature(feature_name: str) -> bool:
+    price_prefixes = ("ret_", "close_to_", "hl_range_", "oc_range_")
+    volume_prefixes = ("volume_rel_", "volume_zscore_")
+    return (
+        feature_name.startswith(price_prefixes)
+        or feature_name in {"log_ret_1", "turnover_proxy", "volume_price_trend_component"}
+        or feature_name.startswith(volume_prefixes)
+    )
+
+
+def _best_model_name(results: dict[str, dict]) -> str:
+    return max(
+        results,
+        key=lambda name: (
+            results[name]["validation"]["metrics"].get("macro_f1", 0.0),
+            results[name]["validation"]["signal_metrics"].get("actionable_f1", 0.0),
+            results[name]["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+            results[name]["validation"]["metrics"].get("balanced_accuracy", 0.0),
+        ),
+    )
+
+
+def _best_scenario_name(results: dict[str, dict]) -> str:
+    return max(
+        results,
+        key=lambda name: (
+            results[name]["models"][results[name]["best_model"]]["validation"]["signal_metrics"].get("actionable_f1", 0.0),
+            results[name]["models"][results[name]["best_model"]]["validation"]["metrics"].get("macro_f1", 0.0),
+            results[name]["models"][results[name]["best_model"]]["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+        ),
+    )
 
 
 def aggregate_walk_forward_folds(folds: list[dict]) -> dict:
@@ -570,12 +847,49 @@ def render_markdown_report(summary: dict) -> str:
             [
                 f"### {model_name}",
                 "",
+                f"- selected_threshold: `{report.get('selected_threshold', report['decision_threshold']):.2f}`",
                 f"- val macro_f1: `{val['metrics'].get('macro_f1', 0):.4f}`",
                 f"- val balanced_accuracy: `{val['metrics'].get('balanced_accuracy', 0):.4f}`",
+                f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- val signal_coverage: `{val['signal_metrics'].get('signal_coverage', 0):.4f}`",
                 f"- test macro_f1: `{test['metrics'].get('macro_f1', 0):.4f}`",
                 f"- test balanced_accuracy: `{test['metrics'].get('balanced_accuracy', 0):.4f}`",
+                f"- test actionable_f1: `{test['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- test signal_coverage: `{test['signal_metrics'].get('signal_coverage', 0):.4f}`",
+                "",
+            ]
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def render_ablation_markdown_report(summary: dict) -> str:
+    lines = [
+        "# Ablation Research Report",
+        "",
+        f"- model_group: `{summary['model_group']}`",
+        f"- dataset_root: `{summary['dataset_root']}`",
+        f"- decision_threshold: `{summary['decision_threshold']}`",
+        f"- best_scenario: `{summary['best_scenario']}`",
+        "",
+        "## Scenarios",
+        "",
+    ]
+
+    for scenario_name, scenario in summary["scenarios"].items():
+        best_model = scenario["best_model"]
+        report = scenario["models"][best_model]
+        val = report["validation"]
+        lines.extend(
+            [
+                f"### {scenario_name}",
+                "",
+                f"- feature_count: `{scenario['feature_count']}`",
+                f"- best_model: `{best_model}`",
+                f"- selected_threshold: `{report.get('selected_threshold', report['decision_threshold']):.2f}`",
+                f"- val macro_f1: `{val['metrics'].get('macro_f1', 0):.4f}`",
+                f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
+                f"- val signal_coverage: `{val['signal_metrics'].get('signal_coverage', 0):.4f}`",
                 "",
             ]
         )

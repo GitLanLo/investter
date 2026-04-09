@@ -43,10 +43,20 @@ invest-ml ingest-factor-parquet --input-parquet path/to/usdrub.parquet --data-ro
 invest-ml materialize-feature-store --data-root ../data --ticker SBER --timeframe 5m --factor usdrub --factor brent --factor rtsi
 invest-ml materialize-dataset --data-root ../data --output-root ../data/datasets --dataset-version v1 --ticker SBER
 invest-ml run-walk-forward-research --dataset-root ../data/datasets/dataset_version=v1 --output-root ../artifacts/research/walk_forward_v1
-invest-ml run-research-pipeline --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/mvp_run --dataset-version mvp_v1 --ticker SBER --factor usdrub --factor brent --factor rtsi --timeframe 5m
+invest-ml run-ablation-research --dataset-root ../data/datasets/dataset_version=v1 --output-root ../artifacts/research/ablation_v1
+invest-ml run-research-pipeline --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/mvp_run --dataset-version mvp_v1 --ticker SBER --factor usdrub --factor brent --factor rtsi --timeframe 5m --run-ablation
 invest-ml tinkoff-sync-asset --data-root ../data --ticker SBER --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind share --class-code TQBR
 invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000UTSTOM --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind currency --class-code CETS
 ```
+
+`run-ablation-research` запускает Sprint 2 ablation series:
+
+- `full`
+- `no_cross_asset`
+- `no_regime`
+- `core_price_volume_only`
+
+Для baseline/ablation research threshold теперь может подбираться только на validation и сохраняется в artifacts рядом с метриками модели.
 
 Текущий `mvp_universe_v1` использует:
 

@@ -6,8 +6,10 @@ import pandas as pd
 
 from ml_core.storage.layouts import write_dataset_split_frame
 from ml_core.training.research import (
+    AblationResearchConfig,
     BaselineResearchConfig,
     WalkForwardConfig,
+    run_ablation_research,
     run_baseline_research,
     run_walk_forward_research,
 )
@@ -68,6 +70,30 @@ def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
     assert (output_root / "rf_multiclass" / "walk_forward_metrics.json").exists()
 
 
+def test_run_ablation_research_writes_scenario_reports(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset_version=v1"
+    output_root = tmp_path / "ablation"
+
+    train_df = _sample_split_df(rows=180, start="2026-01-01T10:00:00Z")
+    val_df = _sample_split_df(rows=90, start="2026-01-02T10:00:00Z")
+    test_df = _sample_split_df(rows=90, start="2026-01-03T10:00:00Z")
+
+    write_dataset_split_frame(train_df, dataset_root=dataset_root, split_name="train")
+    write_dataset_split_frame(val_df, dataset_root=dataset_root, split_name="val")
+    write_dataset_split_frame(test_df, dataset_root=dataset_root, split_name="test")
+
+    summary = run_ablation_research(
+        dataset_root,
+        config=AblationResearchConfig(output_root=output_root),
+    )
+
+    assert summary["best_scenario"] in {"full", "no_cross_asset", "no_regime", "core_price_volume_only"}
+    assert (output_root / "summary.json").exists()
+    assert (output_root / "report.md").exists()
+    assert (output_root / "full" / "summary.json").exists()
+    assert (output_root / "no_cross_asset" / "rf_multiclass" / "metrics.json").exists()
+
+
 def _sample_split_df(*, rows: int, start: str) -> pd.DataFrame:
     base = pd.date_range(start, periods=rows, freq="5min")
     labels = (["up_signal"] * (rows // 3)) + (["down_signal"] * (rows // 3)) + (["no_trade"] * (rows - 2 * (rows // 3)))
@@ -77,6 +103,11 @@ def _sample_split_df(*, rows: int, start: str) -> pd.DataFrame:
             "ticker": ["SBER"] * rows,
             "ret_1": [0.01 * ((i % 5) - 2) for i in range(rows)],
             "ret_3": [0.02 * ((i % 3) - 1) for i in range(rows)],
+            "usdrub_close": [92.0 + (i % 8) * 0.05 for i in range(rows)],
+            "usdrub_ret_1": [0.001 * ((i % 4) - 2) for i in range(rows)],
+            "asset_vs_brent_rel_strength_12": [0.002 * ((i % 6) - 3) for i in range(rows)],
+            "vol_regime_flag": [i % 2 for i in range(rows)],
+            "market_stress_proxy": [0.01 + (i % 5) * 0.002 for i in range(rows)],
             "atr_14_pct": [0.01 + (i % 4) * 0.001 for i in range(rows)],
             "volume_rel_12": [0.1 * ((i % 4) - 1) for i in range(rows)],
             "feature_schema_version": ["feature_v1"] * rows,

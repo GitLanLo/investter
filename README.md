@@ -9,7 +9,7 @@
 - добавлен `Go` backend с рабочими endpoint-ами `health`, `ready`, `assets`, `assets/{id}/candles`, `assets/{id}/factors`, `watchlist`, `analysis/run`, `signals/latest`;
 - добавлен локальный `docker compose` для `PostgreSQL`;
 - добавлены contracts/docs для архитектуры, API и ML;
-- добавлен `ml-core` с feature build, labeling, dataset split, one-shot research pipeline и baseline training pack;
+- добавлен `ml-core` с feature build, labeling, dataset split, one-shot research pipeline, baseline training pack и Sprint 2 ablation runner;
 - добавлен bootstrap model manifest для первого runtime path;
 - добавлена интеграция загрузки исторических данных через Tinkoff Invest API REST proxy;
 - добавлен frontend app shell/workspace с screen map, wireframes и API/domain mapping;
@@ -91,6 +91,9 @@ invest-ml run-research-pipeline \
   --ticker MOEX \
   --ticker NVTK \
   --factor usdrub \
+  --factor brent \
+  --factor rtsi \
+  --run-ablation \
   --timeframe 5m
 ```
 

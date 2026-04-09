@@ -50,6 +50,7 @@ def test_run_research_pipeline_materializes_dataset_and_report(tmp_path: Path) -
             tickers=["SBER"],
             timeframe="5m",
             factor_aliases=["usdrub"],
+            run_ablation=True,
         ),
     )
 
@@ -61,3 +62,5 @@ def test_run_research_pipeline_materializes_dataset_and_report(tmp_path: Path) -
     assert (research_output_root / "report.md").exists()
     assert (research_output_root / "pipeline_summary.json").exists()
     assert (research_output_root / "walk_forward" / "summary.json").exists()
+    assert summary["ablation_summary"] is not None
+    assert (research_output_root / "ablation" / "summary.json").exists()

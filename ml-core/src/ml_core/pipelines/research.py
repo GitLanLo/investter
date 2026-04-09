@@ -16,8 +16,10 @@ from ml_core.pipelines.materialize import (
     materialize_feature_store,
 )
 from ml_core.training.research import (
+    AblationResearchConfig,
     BaselineResearchConfig,
     WalkForwardConfig,
+    run_ablation_research,
     run_baseline_research,
     run_walk_forward_research,
 )
@@ -40,6 +42,8 @@ class ResearchPipelineConfig:
     research_config: BaselineResearchConfig | None = None
     run_walk_forward: bool = True
     walk_forward_config: WalkForwardConfig | None = None
+    run_ablation: bool = False
+    ablation_config: AblationResearchConfig | None = None
 
 
 def run_research_pipeline(
@@ -91,6 +95,7 @@ def run_research_pipeline(
     research_config.output_root.mkdir(parents=True, exist_ok=True)
     research_summary = run_baseline_research(dataset_root, config=research_config)
     walk_forward_summary = None
+    ablation_summary = None
     if config.run_walk_forward:
         walk_forward_config = config.walk_forward_config or WalkForwardConfig(
             output_root=config.research_output_root / "walk_forward",
@@ -99,6 +104,13 @@ def run_research_pipeline(
             purge_gap_bars=split_config.purge_gap_bars,
         )
         walk_forward_summary = run_walk_forward_research(dataset_root, config=walk_forward_config)
+    if config.run_ablation:
+        ablation_config = config.ablation_config or AblationResearchConfig(
+            output_root=config.research_output_root / "ablation",
+            decision_threshold=research_config.decision_threshold,
+            random_state=research_config.random_state,
+        )
+        ablation_summary = run_ablation_research(dataset_root, config=ablation_config)
 
     pipeline_summary = {
         "dataset_version": config.dataset_version,
@@ -111,6 +123,7 @@ def run_research_pipeline(
         "dataset_manifest": dataset_manifest,
         "research_summary": research_summary,
         "walk_forward_summary": walk_forward_summary,
+        "ablation_summary": ablation_summary,
     }
     (research_config.output_root / "pipeline_summary.json").write_text(
         json.dumps(pipeline_summary, indent=2, ensure_ascii=False, default=str),
