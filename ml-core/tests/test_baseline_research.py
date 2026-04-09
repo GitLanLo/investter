@@ -15,6 +15,13 @@ from ml_core.training.research import (
     run_walk_forward_research,
 )
 
+MODEL_NAMES = {
+    "logreg_multiclass",
+    "rf_multiclass",
+    "extra_trees_multiclass",
+    "hgb_multiclass",
+}
+
 
 def test_run_baseline_research_writes_summary_and_report(tmp_path: Path) -> None:
     dataset_root = tmp_path / "dataset_version=v1"
@@ -33,7 +40,7 @@ def test_run_baseline_research_writes_summary_and_report(tmp_path: Path) -> None
         config=BaselineResearchConfig(output_root=output_root),
     )
 
-    assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
+    assert summary["best_model"] in MODEL_NAMES
     assert summary["research_candidate"]["model_name"] == summary["best_model"]
     assert "selection_mode" in summary["production_candidate"]
     assert "validation_gate" in summary["production_candidate"]
@@ -46,6 +53,8 @@ def test_run_baseline_research_writes_summary_and_report(tmp_path: Path) -> None
     assert (output_root / "logreg_multiclass" / "val_predictions.parquet").exists()
     assert (output_root / "logreg_multiclass" / "val_reliability.json").exists()
     assert (output_root / "rf_multiclass" / "feature_importance.csv").exists()
+    assert (output_root / "extra_trees_multiclass" / "metrics.json").exists()
+    assert (output_root / "hgb_multiclass" / "test_reliability.json").exists()
 
 
 def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
@@ -71,7 +80,7 @@ def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
         ),
     )
 
-    assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
+    assert summary["best_model"] in MODEL_NAMES
     assert summary["research_candidate"]["model_name"] == summary["best_model"]
     assert "validation_gate" in summary["production_candidate"]
     assert "actionable_expected_calibration_error" in summary["models"][summary["best_model"]]["walk_forward"]["probability_metrics_mean"]
@@ -80,6 +89,8 @@ def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
     assert (output_root / "report.md").exists()
     assert (output_root / "logreg_multiclass" / "walk_forward_predictions.parquet").exists()
     assert (output_root / "rf_multiclass" / "walk_forward_metrics.json").exists()
+    assert (output_root / "extra_trees_multiclass" / "walk_forward_metrics.json").exists()
+    assert (output_root / "hgb_multiclass" / "walk_forward_predictions.parquet").exists()
 
 
 def test_run_ablation_research_writes_scenario_reports(tmp_path: Path) -> None:

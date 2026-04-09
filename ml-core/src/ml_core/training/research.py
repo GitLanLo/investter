@@ -8,7 +8,7 @@ import pickle
 import numpy as np
 import pandas as pd
 
-from ml_core.training.baselines import _classification_metrics, _feature_columns, _model_pack
+from ml_core.training.baselines import _classification_metrics, _feature_columns, _fit_model_pipeline, _model_pack
 
 DEFAULT_THRESHOLD_GRID = (0.55, 0.6, 0.65, 0.7, 0.75, 0.8)
 DEFAULT_CALIBRATION_BINS = 8
@@ -248,7 +248,12 @@ def _run_model_suite(
     y_train = train_df["label_class"].astype(str)
 
     for model_name, pipeline in _model_pack(random_state).items():
-        pipeline.fit(x_train, y_train)
+        _fit_model_pipeline(
+            model_name,
+            pipeline,
+            x_train,
+            y_train,
+        )
         model_dir = output_root / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -355,7 +360,9 @@ def run_walk_forward_research(
             train_frame = fold["train"]
             validation_frame = fold["validation"]
 
-            pipeline.fit(
+            _fit_model_pipeline(
+                model_name,
+                pipeline,
                 train_frame[feature_columns],
                 train_frame["label_class"].astype(str),
             )

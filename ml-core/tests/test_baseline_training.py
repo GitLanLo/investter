@@ -49,6 +49,10 @@ def test_train_baseline_pack_writes_summary_and_models(tmp_path: Path) -> None:
 
     assert "logreg_multiclass" in summary["models"]
     assert "rf_multiclass" in summary["models"]
+    assert "extra_trees_multiclass" in summary["models"]
+    assert "hgb_multiclass" in summary["models"]
     assert (output_root / "summary.json").exists()
     assert (output_root / "logreg_multiclass" / "model.pkl").exists()
     assert (output_root / "rf_multiclass" / "metrics.json").exists()
+    assert (output_root / "extra_trees_multiclass" / "metrics.json").exists()
+    assert (output_root / "hgb_multiclass" / "predictions.parquet").exists()

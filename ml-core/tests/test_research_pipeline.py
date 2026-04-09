@@ -55,7 +55,12 @@ def test_run_research_pipeline_materializes_dataset_and_report(tmp_path: Path) -
     )
 
     assert summary["dataset_version"] == "pipeline_v1"
-    assert summary["research_summary"]["best_model"] in {"logreg_multiclass", "rf_multiclass"}
+    assert summary["research_summary"]["best_model"] in {
+        "logreg_multiclass",
+        "rf_multiclass",
+        "extra_trees_multiclass",
+        "hgb_multiclass",
+    }
     assert summary["research_summary"]["research_candidate"]["model_name"] == summary["research_summary"]["best_model"]
     assert "validation_gate" in summary["research_summary"]["production_candidate"]
     assert summary["walk_forward_summary"] is not None

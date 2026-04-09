@@ -59,6 +59,8 @@ invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000
 
 Для baseline/ablation research threshold теперь может подбираться только на validation и сохраняется в artifacts рядом с метриками модели.
 
+Текущий model pack включает `logreg_multiclass`, `rf_multiclass`, `extra_trees_multiclass` и `hgb_multiclass`.
+
 `run-calibration-audit` делает post-hoc audit по уже сохранённым `val/test_predictions.parquet` и сравнивает `identity`, `platt`, `isotonic` с отдельным production gate по precision/coverage/ECE.
 
 Текущий `mvp_universe_v1` использует:

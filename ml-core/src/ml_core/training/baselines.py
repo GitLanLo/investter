@@ -9,12 +9,13 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 
 
 TARGET_CLASS_ORDER = ["down_signal", "no_trade", "up_signal"]
@@ -46,7 +47,12 @@ def train_baseline_pack(
 
     results: dict[str, dict] = {}
     for model_name, pipeline in _model_pack(config.random_state).items():
-        pipeline.fit(x_train, y_train)
+        _fit_model_pipeline(
+            model_name,
+            pipeline,
+            x_train,
+            y_train,
+        )
         pred = pipeline.predict(x_val)
         prob = pipeline.predict_proba(x_val)
         metrics = _classification_metrics(y_val, pred)
@@ -161,7 +167,55 @@ def _model_pack(random_state: int) -> dict[str, Pipeline]:
                 ),
             ]
         ),
+        "extra_trees_multiclass": Pipeline(
+            steps=[
+                ("preprocessor", ColumnTransformer([("num", passthrough_preprocessor, slice(0, None))])),
+                (
+                    "model",
+                    ExtraTreesClassifier(
+                        n_estimators=300,
+                        max_depth=10,
+                        min_samples_leaf=4,
+                        n_jobs=1,
+                        class_weight="balanced_subsample",
+                        random_state=random_state,
+                    ),
+                ),
+            ]
+        ),
+        "hgb_multiclass": Pipeline(
+            steps=[
+                ("preprocessor", ColumnTransformer([("num", numeric_preprocessor, slice(0, None))])),
+                (
+                    "model",
+                    HistGradientBoostingClassifier(
+                        learning_rate=0.05,
+                        max_iter=250,
+                        max_depth=6,
+                        min_samples_leaf=20,
+                        l2_regularization=0.05,
+                        early_stopping=False,
+                        random_state=random_state,
+                    ),
+                ),
+            ]
+        ),
     }
+
+
+def _fit_model_pipeline(
+    model_name: str,
+    pipeline: Pipeline,
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+) -> Pipeline:
+    if model_name == "hgb_multiclass":
+        sample_weight = compute_sample_weight(class_weight="balanced", y=y_train.astype(str))
+        pipeline.fit(x_train, y_train, model__sample_weight=sample_weight)
+        return pipeline
+
+    pipeline.fit(x_train, y_train)
+    return pipeline
 
 
 def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
