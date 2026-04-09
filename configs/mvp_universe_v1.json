@@ -1,0 +1,15 @@
+{
+  "name": "mvp_universe_v1",
+  "assets": [
+    { "ticker": "SBER", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR" },
+    { "ticker": "GAZP", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR" },
+    { "ticker": "LKOH", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR" },
+    { "ticker": "MOEX", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR" },
+    { "ticker": "NVTK", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR" }
+  ],
+  "factors": [
+    { "alias": "usdrub", "ticker": "USD000UTSTOM", "timeframe": "5m", "instrument_kind": "currency", "class_code": "CETS" },
+    { "alias": "brent", "ticker": "BRM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" },
+    { "alias": "rtsi", "ticker": "RIM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" }
+  ]
+}

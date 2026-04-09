@@ -1,0 +1,37 @@
+package repository
+
+import (
+	"context"
+	"time"
+
+	"invest/backend/internal/domain"
+)
+
+type AssetRepository interface {
+	List(ctx context.Context) ([]domain.Asset, error)
+	GetByID(ctx context.Context, id string) (domain.Asset, error)
+	Upsert(ctx context.Context, asset domain.Asset) error
+}
+
+type MarketDataRepository interface {
+	ListCandles(ctx context.Context, ticker string, timeframe string, from time.Time, to time.Time, limit int) ([]domain.Candle, error)
+	ListFactors(ctx context.Context, timeframe string, from time.Time, to time.Time) ([]domain.FactorBar, error)
+}
+
+type WatchlistRepository interface {
+	GetOrCreateByName(ctx context.Context, name string) (domain.Watchlist, error)
+	ListItems(ctx context.Context, watchlistID int64) ([]domain.WatchlistItem, error)
+	AddItem(ctx context.Context, watchlistID int64, assetID string, position int) error
+}
+
+type ModelRegistryRepository interface {
+	List(ctx context.Context) ([]domain.ModelRegistryEntry, error)
+	GetActive(ctx context.Context) (domain.ModelRegistryEntry, error)
+	GetByVersion(ctx context.Context, version string) (domain.ModelRegistryEntry, error)
+	Register(ctx context.Context, entry domain.ModelRegistryEntry) error
+}
+
+type SignalRunRepository interface {
+	Create(ctx context.Context, run domain.SignalRun) (domain.SignalRun, error)
+	ListLatest(ctx context.Context, limit int) ([]domain.SignalRun, error)
+}
