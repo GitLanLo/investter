@@ -33,9 +33,15 @@ def test_run_baseline_research_writes_summary_and_report(tmp_path: Path) -> None
     )
 
     assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
+    assert summary["production_candidate"]["model_name"] == summary["best_model"]
+    assert (
+        summary["production_candidate"]["validation"]["actionable_expected_calibration_error"] is None
+        or summary["production_candidate"]["validation"]["actionable_expected_calibration_error"] >= 0.0
+    )
     assert (output_root / "summary.json").exists()
     assert (output_root / "report.md").exists()
     assert (output_root / "logreg_multiclass" / "val_predictions.parquet").exists()
+    assert (output_root / "logreg_multiclass" / "val_reliability.json").exists()
     assert (output_root / "rf_multiclass" / "feature_importance.csv").exists()
 
 
@@ -63,6 +69,8 @@ def test_run_walk_forward_research_writes_fold_reports(tmp_path: Path) -> None:
     )
 
     assert summary["best_model"] in {"logreg_multiclass", "rf_multiclass"}
+    assert summary["production_candidate"]["model_name"] == summary["best_model"]
+    assert "actionable_expected_calibration_error" in summary["models"][summary["best_model"]]["walk_forward"]["probability_metrics_mean"]
     assert summary["fold_count"] >= 1
     assert (output_root / "summary.json").exists()
     assert (output_root / "report.md").exists()
@@ -88,10 +96,13 @@ def test_run_ablation_research_writes_scenario_reports(tmp_path: Path) -> None:
     )
 
     assert summary["best_scenario"] in {"full", "no_cross_asset", "no_regime", "core_price_volume_only"}
+    assert summary["production_candidate"]["scenario_name"] == summary["best_scenario"]
+    assert summary["production_candidate"]["model_name"] == summary["scenarios"][summary["best_scenario"]]["best_model"]
     assert (output_root / "summary.json").exists()
     assert (output_root / "report.md").exists()
     assert (output_root / "full" / "summary.json").exists()
     assert (output_root / "no_cross_asset" / "rf_multiclass" / "metrics.json").exists()
+    assert (output_root / "no_cross_asset" / "rf_multiclass" / "val_reliability.json").exists()
 
 
 def _sample_split_df(*, rows: int, start: str) -> pd.DataFrame:

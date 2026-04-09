@@ -11,6 +11,19 @@ import pandas as pd
 from ml_core.training.baselines import _classification_metrics, _feature_columns, _model_pack
 
 DEFAULT_THRESHOLD_GRID = (0.55, 0.6, 0.65, 0.7, 0.75, 0.8)
+DEFAULT_CALIBRATION_BINS = 8
+PRODUCTION_CANDIDATE_POLICY = {
+    "selection_basis": "validation_only",
+    "ranking": [
+        "validation.signal_metrics.actionable_f1",
+        "validation.probability_metrics.actionable_expected_calibration_error_lower_is_better",
+        "validation.signal_metrics.precision_actionable_signal",
+        "validation.metrics.macro_f1",
+        "validation.signal_metrics.signal_coverage",
+    ],
+    "calibration_scope": "actionable directional probabilities at the selected threshold",
+    "test_usage": "audit_only",
+}
 
 
 @dataclass(slots=True)
@@ -21,6 +34,7 @@ class BaselineResearchConfig:
     decision_threshold: float = 0.65
     tune_decision_threshold: bool = True
     threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID
+    calibration_bins: int = DEFAULT_CALIBRATION_BINS
 
 
 @dataclass(slots=True)
@@ -30,6 +44,7 @@ class AblationResearchConfig:
     random_state: int = 42
     decision_threshold: float = 0.65
     threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID
+    calibration_bins: int = DEFAULT_CALIBRATION_BINS
 
 
 @dataclass(slots=True)
@@ -38,6 +53,7 @@ class WalkForwardConfig:
     model_group: str = "walk_forward_research_v1"
     random_state: int = 42
     decision_threshold: float = 0.65
+    calibration_bins: int = DEFAULT_CALIBRATION_BINS
     initial_train_ratio: float = 0.6
     validation_ratio: float = 0.1
     step_ratio: float = 0.05
@@ -74,6 +90,7 @@ def run_baseline_research(
         decision_threshold=config.decision_threshold,
         tune_decision_threshold=config.tune_decision_threshold,
         threshold_grid=config.threshold_grid,
+        calibration_bins=config.calibration_bins,
     )
     best_model_name = _best_model_name(results)
     summary = {
@@ -82,6 +99,8 @@ def run_baseline_research(
         "decision_threshold": config.decision_threshold,
         "dataset_root": str(dataset_root),
         "best_model": best_model_name,
+        "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
+        "production_candidate": _build_model_candidate_summary(best_model_name, results[best_model_name]),
         "models": results,
     }
     (config.output_root / "summary.json").write_text(
@@ -129,6 +148,7 @@ def run_ablation_research(
             decision_threshold=config.decision_threshold,
             tune_decision_threshold=True,
             threshold_grid=config.threshold_grid,
+            calibration_bins=config.calibration_bins,
         )
         best_model_name = _best_model_name(results)
         scenario_summary = {
@@ -151,6 +171,8 @@ def run_ablation_research(
         "decision_threshold": config.decision_threshold,
         "scenario_count": len(scenario_summaries),
         "best_scenario": best_scenario_name,
+        "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
+        "production_candidate": _build_ablation_candidate_summary(best_scenario_name, scenario_summaries[best_scenario_name]),
         "scenarios": scenario_summaries,
     }
     (config.output_root / "summary.json").write_text(
@@ -175,6 +197,7 @@ def _run_model_suite(
     decision_threshold: float,
     tune_decision_threshold: bool,
     threshold_grid: tuple[float, ...],
+    calibration_bins: int,
 ) -> dict[str, dict]:
     results: dict[str, dict] = {}
     x_train = train_df[feature_columns]
@@ -207,6 +230,7 @@ def _run_model_suite(
             split_name="val",
             classes=classes,
             decision_threshold=selected_threshold,
+            calibration_bins=calibration_bins,
         )
         test_predictions, _ = build_prediction_frame(
             pipeline,
@@ -218,10 +242,19 @@ def _run_model_suite(
             split_name="test",
             classes=classes,
             decision_threshold=selected_threshold,
+            calibration_bins=calibration_bins,
         )
 
         val_result["predictions"].to_parquet(model_dir / "val_predictions.parquet", index=False)
         test_result["predictions"].to_parquet(model_dir / "test_predictions.parquet", index=False)
+        (model_dir / "val_reliability.json").write_text(
+            json.dumps(val_result["reliability"], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (model_dir / "test_reliability.json").write_text(
+            json.dumps(test_result["reliability"], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
         importance = compute_feature_importance(
             pipeline.named_steps["model"],
@@ -288,6 +321,7 @@ def run_walk_forward_research(
                 feature_columns=feature_columns,
                 split_name=f"fold_{fold['fold_id']}",
                 decision_threshold=config.decision_threshold,
+                calibration_bins=config.calibration_bins,
             )
 
             fold_summary = {
@@ -296,6 +330,7 @@ def run_walk_forward_research(
                 "validation_range": fold["validation_range"],
                 "train_rows": fold["train_rows"],
                 "validation_rows": fold["validation_rows"],
+                "reliability": validation_result["reliability"],
                 **validation_result["summary"],
             }
             fold_summaries.append(fold_summary)
@@ -338,18 +373,14 @@ def run_walk_forward_research(
         )
         results[model_name] = report
 
-    best_model_name = max(
-        results,
-        key=lambda name: (
-            results[name]["walk_forward"]["validation_metrics_mean"].get("macro_f1", 0.0),
-            results[name]["walk_forward"]["validation_metrics_mean"].get("balanced_accuracy", 0.0),
-        ),
-    )
+    best_model_name = _best_walk_forward_model_name(results)
     summary = {
         "model_group": config.model_group,
         "dataset_root": str(dataset_root),
         "decision_threshold": config.decision_threshold,
         "best_model": best_model_name,
+        "production_candidate_policy": PRODUCTION_CANDIDATE_POLICY,
+        "production_candidate": _build_walk_forward_candidate_summary(best_model_name, results[best_model_name]),
         "fold_count": len(folds),
         "fold_config": {
             "initial_train_ratio": config.initial_train_ratio,
@@ -359,6 +390,7 @@ def run_walk_forward_research(
             "min_train_timestamps": config.min_train_timestamps,
             "min_validation_timestamps": config.min_validation_timestamps,
             "max_folds": config.max_folds,
+            "calibration_bins": config.calibration_bins,
         },
         "models": results,
     }
@@ -470,6 +502,7 @@ def evaluate_split(
     feature_columns: list[str],
     split_name: str,
     decision_threshold: float,
+    calibration_bins: int = DEFAULT_CALIBRATION_BINS,
 ) -> dict:
     predictions, classes = build_prediction_frame(
         pipeline,
@@ -481,6 +514,7 @@ def evaluate_split(
         split_name=split_name,
         classes=classes,
         decision_threshold=decision_threshold,
+        calibration_bins=calibration_bins,
     )
 
 
@@ -519,6 +553,7 @@ def summarize_prediction_frame(
     split_name: str,
     classes: list[str],
     decision_threshold: float,
+    calibration_bins: int,
 ) -> dict:
     if predictions.empty:
         return {
@@ -527,15 +562,23 @@ def summarize_prediction_frame(
                 "rows": 0,
                 "metrics": {},
                 "signal_metrics": {},
+                "probability_metrics": {},
                 "per_ticker": {},
             },
             "predictions": predictions,
+            "reliability": {"bin_count": calibration_bins, "bins": []},
         }
 
     signal_metrics = compute_signal_metrics(
         predictions,
         classes=classes,
         decision_threshold=decision_threshold,
+    )
+    probability_metrics, reliability = compute_probability_quality_metrics(
+        predictions,
+        classes=classes,
+        decision_threshold=decision_threshold,
+        calibration_bins=calibration_bins,
     )
     per_ticker = compute_per_ticker_metrics(
         predictions,
@@ -552,9 +595,11 @@ def summarize_prediction_frame(
                 predictions["pred_class"].astype(str).to_numpy(),
             ),
             "signal_metrics": signal_metrics,
+            "probability_metrics": probability_metrics,
             "per_ticker": per_ticker,
         },
         "predictions": predictions,
+        "reliability": reliability,
     }
 
 
@@ -607,6 +652,116 @@ def compute_per_ticker_metrics(
             decision_threshold=decision_threshold,
         )
     return result
+
+
+def compute_probability_quality_metrics(
+    predictions: pd.DataFrame,
+    *,
+    classes: list[str],
+    decision_threshold: float,
+    calibration_bins: int,
+) -> tuple[dict[str, float | int | None], dict]:
+    prob_matrix = np.column_stack(
+        [predictions.get(f"prob_{cls}", pd.Series(np.zeros(len(predictions)), index=predictions.index)).to_numpy(dtype="float64") for cls in classes]
+    )
+    truth_matrix = np.column_stack(
+        [(predictions["label_class"].astype(str) == cls).to_numpy(dtype="float64") for cls in classes]
+    )
+    multiclass_brier = float(np.mean(np.sum((prob_matrix - truth_matrix) ** 2, axis=1))) if len(predictions) else 0.0
+
+    actionable_mask, predicted_direction = actionable_signal_mask(
+        predictions,
+        classes=classes,
+        decision_threshold=decision_threshold,
+    )
+    directional_prob = _directional_probability_series(predictions, classes=classes)
+    directional_success = (
+        (predicted_direction.astype(str) == predictions["label_class"].astype(str))
+        & predictions["label_class"].isin(["up_signal", "down_signal"])
+    ).astype("int8")
+
+    actionable_probs = directional_prob[actionable_mask].astype("float64")
+    actionable_targets = directional_success[actionable_mask].astype("float64")
+    actionable_count = int(actionable_mask.sum())
+    actionable_brier = (
+        float(np.mean((actionable_probs.to_numpy() - actionable_targets.to_numpy()) ** 2))
+        if actionable_count
+        else None
+    )
+    reliability = build_reliability_bins(
+        actionable_probs.to_numpy(dtype="float64"),
+        actionable_targets.to_numpy(dtype="float64"),
+        threshold=decision_threshold,
+        calibration_bins=calibration_bins,
+    )
+
+    return (
+        {
+            "multiclass_brier_score": multiclass_brier,
+            "actionable_brier_score": actionable_brier,
+            "actionable_expected_calibration_error": reliability["expected_calibration_error"],
+            "actionable_average_confidence": reliability["average_confidence"],
+            "actionable_empirical_precision": reliability["empirical_precision"],
+            "actionable_count": actionable_count,
+        },
+        reliability,
+    )
+
+
+def build_reliability_bins(
+    probabilities: np.ndarray,
+    targets: np.ndarray,
+    *,
+    threshold: float,
+    calibration_bins: int,
+) -> dict:
+    if probabilities.size == 0:
+        return {
+            "threshold": float(threshold),
+            "bin_count": int(calibration_bins),
+            "expected_calibration_error": None,
+            "average_confidence": None,
+            "empirical_precision": None,
+            "bins": [],
+        }
+
+    edges = np.linspace(float(threshold), 1.0, max(2, calibration_bins) + 1)
+    assignments = np.digitize(probabilities, edges[1:-1], right=False)
+    bins: list[dict] = []
+    ece = 0.0
+
+    for idx in range(len(edges) - 1):
+        mask = assignments == idx
+        if not np.any(mask):
+            continue
+
+        bin_probs = probabilities[mask]
+        bin_targets = targets[mask]
+        confidence_mean = float(np.mean(bin_probs))
+        empirical_precision = float(np.mean(bin_targets))
+        gap = empirical_precision - confidence_mean
+        count = int(mask.sum())
+        bins.append(
+            {
+                "bin_index": idx,
+                "range_min": float(edges[idx]),
+                "range_max": float(edges[idx + 1]),
+                "count": count,
+                "confidence_mean": confidence_mean,
+                "empirical_precision": empirical_precision,
+                "gap": float(gap),
+            }
+        )
+        ece += abs(gap) * (count / probabilities.size)
+
+    return {
+        "threshold": float(threshold),
+        "bin_count": int(calibration_bins),
+        "expected_calibration_error": float(ece),
+        "average_confidence": float(np.mean(probabilities)),
+        "empirical_precision": float(np.mean(targets)),
+        "bins": bins,
+    }
 
 
 def tune_threshold_from_validation(
@@ -684,10 +839,7 @@ def actionable_signal_mask(
     classes: list[str],
     decision_threshold: float,
 ) -> tuple[pd.Series, pd.Series]:
-    prob_by_class = {cls: predictions.get(f"prob_{cls}", pd.Series(np.zeros(len(predictions)))) for cls in classes}
-    up = prob_by_class.get("up_signal", pd.Series(np.zeros(len(predictions))))
-    down = prob_by_class.get("down_signal", pd.Series(np.zeros(len(predictions))))
-    no_trade = prob_by_class.get("no_trade", pd.Series(np.zeros(len(predictions))))
+    up, down, no_trade = _probability_series_by_role(predictions, classes=classes)
 
     predicted_direction = np.where(up >= down, "up_signal", "down_signal")
     directional_prob = np.where(up >= down, up, down)
@@ -698,6 +850,29 @@ def actionable_signal_mask(
     )
     actionable = (winning_class != "no_trade") & (directional_prob >= decision_threshold)
     return pd.Series(actionable), pd.Series(predicted_direction)
+
+
+def _directional_probability_series(predictions: pd.DataFrame, *, classes: list[str]) -> pd.Series:
+    up, down, _ = _probability_series_by_role(predictions, classes=classes)
+    return pd.Series(np.where(up >= down, up, down), index=predictions.index)
+
+
+def _probability_series_by_role(
+    predictions: pd.DataFrame,
+    *,
+    classes: list[str],
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    prob_by_class = {
+        cls: predictions.get(
+            f"prob_{cls}",
+            pd.Series(np.zeros(len(predictions)), index=predictions.index),
+        ).astype("float64")
+        for cls in classes
+    }
+    up = prob_by_class.get("up_signal", pd.Series(np.zeros(len(predictions)), index=predictions.index, dtype="float64"))
+    down = prob_by_class.get("down_signal", pd.Series(np.zeros(len(predictions)), index=predictions.index, dtype="float64"))
+    no_trade = prob_by_class.get("no_trade", pd.Series(np.zeros(len(predictions)), index=predictions.index, dtype="float64"))
+    return up, down, no_trade
 
 
 def _is_cross_asset_feature(feature_name: str) -> bool:
@@ -732,12 +907,41 @@ def _best_model_name(results: dict[str, dict]) -> str:
     return max(
         results,
         key=lambda name: (
-            results[name]["validation"]["metrics"].get("macro_f1", 0.0),
             results[name]["validation"]["signal_metrics"].get("actionable_f1", 0.0),
+            -_none_safe(results[name]["validation"]["probability_metrics"].get("actionable_expected_calibration_error")),
             results[name]["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+            results[name]["validation"]["metrics"].get("macro_f1", 0.0),
+            results[name]["validation"]["signal_metrics"].get("signal_coverage", 0.0),
             results[name]["validation"]["metrics"].get("balanced_accuracy", 0.0),
         ),
     )
+
+
+def _build_model_candidate_summary(model_name: str, report: dict) -> dict:
+    return {
+        "model_name": model_name,
+        "selected_threshold": report.get("selected_threshold", report.get("decision_threshold")),
+        "validation": {
+            "macro_f1": report["validation"]["metrics"].get("macro_f1", 0.0),
+            "balanced_accuracy": report["validation"]["metrics"].get("balanced_accuracy", 0.0),
+            "actionable_f1": report["validation"]["signal_metrics"].get("actionable_f1", 0.0),
+            "precision_actionable_signal": report["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+            "signal_coverage": report["validation"]["signal_metrics"].get("signal_coverage", 0.0),
+            "actionable_expected_calibration_error": report["validation"]["probability_metrics"].get(
+                "actionable_expected_calibration_error"
+            ),
+        },
+        "test": {
+            "macro_f1": report["test"]["metrics"].get("macro_f1", 0.0),
+            "balanced_accuracy": report["test"]["metrics"].get("balanced_accuracy", 0.0),
+            "actionable_f1": report["test"]["signal_metrics"].get("actionable_f1", 0.0),
+            "precision_actionable_signal": report["test"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+            "signal_coverage": report["test"]["signal_metrics"].get("signal_coverage", 0.0),
+            "actionable_expected_calibration_error": report["test"]["probability_metrics"].get(
+                "actionable_expected_calibration_error"
+            ),
+        },
+    }
 
 
 def _best_scenario_name(results: dict[str, dict]) -> str:
@@ -745,10 +949,83 @@ def _best_scenario_name(results: dict[str, dict]) -> str:
         results,
         key=lambda name: (
             results[name]["models"][results[name]["best_model"]]["validation"]["signal_metrics"].get("actionable_f1", 0.0),
-            results[name]["models"][results[name]["best_model"]]["validation"]["metrics"].get("macro_f1", 0.0),
+            -_none_safe(
+                results[name]["models"][results[name]["best_model"]]["validation"]["probability_metrics"].get(
+                    "actionable_expected_calibration_error"
+                )
+            ),
             results[name]["models"][results[name]["best_model"]]["validation"]["signal_metrics"].get("precision_actionable_signal", 0.0),
+            results[name]["models"][results[name]["best_model"]]["validation"]["metrics"].get("macro_f1", 0.0),
+            results[name]["models"][results[name]["best_model"]]["validation"]["signal_metrics"].get("signal_coverage", 0.0),
         ),
     )
+
+
+def _build_ablation_candidate_summary(scenario_name: str, scenario_summary: dict) -> dict:
+    best_model = scenario_summary["best_model"]
+    report = scenario_summary["models"][best_model]
+    candidate = _build_model_candidate_summary(best_model, report)
+    return {
+        "scenario_name": scenario_name,
+        "feature_count": scenario_summary["feature_count"],
+        **candidate,
+    }
+
+
+def _best_walk_forward_model_name(results: dict[str, dict]) -> str:
+    return max(
+        results,
+        key=lambda name: (
+            results[name]["walk_forward"]["signal_metrics_mean"].get("actionable_f1", 0.0),
+            -_none_safe(
+                results[name]["walk_forward"]["probability_metrics_mean"].get(
+                    "actionable_expected_calibration_error"
+                )
+            ),
+            results[name]["walk_forward"]["signal_metrics_mean"].get("precision_actionable_signal", 0.0),
+            results[name]["walk_forward"]["validation_metrics_mean"].get("macro_f1", 0.0),
+            results[name]["walk_forward"]["signal_metrics_mean"].get("signal_coverage", 0.0),
+            results[name]["walk_forward"]["validation_metrics_mean"].get("balanced_accuracy", 0.0),
+        ),
+    )
+
+
+def _build_walk_forward_candidate_summary(model_name: str, report: dict) -> dict:
+    aggregate = report["walk_forward"]
+    return {
+        "model_name": model_name,
+        "selected_threshold": report.get("decision_threshold"),
+        "validation_mean": {
+            "macro_f1": aggregate["validation_metrics_mean"].get("macro_f1", 0.0),
+            "balanced_accuracy": aggregate["validation_metrics_mean"].get("balanced_accuracy", 0.0),
+            "actionable_f1": aggregate["signal_metrics_mean"].get("actionable_f1", 0.0),
+            "precision_actionable_signal": aggregate["signal_metrics_mean"].get("precision_actionable_signal", 0.0),
+            "signal_coverage": aggregate["signal_metrics_mean"].get("signal_coverage", 0.0),
+            "actionable_expected_calibration_error": aggregate["probability_metrics_mean"].get(
+                "actionable_expected_calibration_error"
+            ),
+        },
+        "validation_std": {
+            "macro_f1": aggregate["validation_metrics_std"].get("macro_f1", 0.0),
+            "balanced_accuracy": aggregate["validation_metrics_std"].get("balanced_accuracy", 0.0),
+            "actionable_f1": aggregate["signal_metrics_std"].get("actionable_f1", 0.0),
+            "precision_actionable_signal": aggregate["signal_metrics_std"].get("precision_actionable_signal", 0.0),
+            "signal_coverage": aggregate["signal_metrics_std"].get("signal_coverage", 0.0),
+            "actionable_expected_calibration_error": aggregate["probability_metrics_std"].get(
+                "actionable_expected_calibration_error"
+            ),
+        },
+    }
+
+
+def _none_safe(value: float | None) -> float:
+    return float(value) if value is not None else float("inf")
+
+
+def _format_metric(value: float | None, *, precision: int = 4) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.{precision}f}"
 
 
 def aggregate_walk_forward_folds(folds: list[dict]) -> dict:
@@ -759,13 +1036,21 @@ def aggregate_walk_forward_folds(folds: list[dict]) -> dict:
         "validation_metrics_std": _aggregate_numeric_dicts([fold.get("metrics", {}) for fold in folds], reducer="std"),
         "signal_metrics_mean": _aggregate_numeric_dicts([fold.get("signal_metrics", {}) for fold in folds], reducer="mean"),
         "signal_metrics_std": _aggregate_numeric_dicts([fold.get("signal_metrics", {}) for fold in folds], reducer="std"),
+        "probability_metrics_mean": _aggregate_numeric_dicts(
+            [fold.get("probability_metrics", {}) for fold in folds],
+            reducer="mean",
+        ),
+        "probability_metrics_std": _aggregate_numeric_dicts(
+            [fold.get("probability_metrics", {}) for fold in folds],
+            reducer="std",
+        ),
         "per_ticker_mean": _aggregate_per_ticker_metrics(folds, reducer="mean"),
         "per_ticker_std": _aggregate_per_ticker_metrics(folds, reducer="std"),
     }
 
 
-def _aggregate_per_ticker_metrics(folds: list[dict], *, reducer: str) -> dict[str, dict[str, float]]:
-    by_ticker: dict[str, list[dict[str, float]]] = {}
+def _aggregate_per_ticker_metrics(folds: list[dict], *, reducer: str) -> dict[str, dict[str, float | None]]:
+    by_ticker: dict[str, list[dict[str, float | None]]] = {}
     for fold in folds:
         for ticker, metrics in fold.get("per_ticker", {}).items():
             by_ticker.setdefault(str(ticker), []).append(metrics)
@@ -776,18 +1061,19 @@ def _aggregate_per_ticker_metrics(folds: list[dict], *, reducer: str) -> dict[st
     }
 
 
-def _aggregate_numeric_dicts(items: list[dict], *, reducer: str) -> dict[str, float]:
+def _aggregate_numeric_dicts(items: list[dict], *, reducer: str) -> dict[str, float | None]:
     if not items:
         return {}
 
-    keys = sorted({key for item in items for key, value in item.items() if isinstance(value, (int, float))})
-    aggregated: dict[str, float] = {}
+    keys = sorted({key for item in items for key, value in item.items() if isinstance(value, (int, float)) or value is None})
+    aggregated: dict[str, float | None] = {}
     for key in keys:
         values = np.asarray(
             [float(item[key]) for item in items if key in item and isinstance(item[key], (int, float))],
             dtype="float64",
         )
         if values.size == 0:
+            aggregated[key] = None
             continue
         if reducer == "std":
             aggregated[key] = float(np.nanstd(values))
@@ -835,6 +1121,9 @@ def render_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_model: `{summary['best_model']}`",
+        f"- production_candidate: `{summary['production_candidate']['model_name']}`",
+        f"- candidate val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
+        f"- candidate val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
         "",
         "## Models",
         "",
@@ -852,10 +1141,12 @@ def render_markdown_report(summary: dict) -> str:
                 f"- val balanced_accuracy: `{val['metrics'].get('balanced_accuracy', 0):.4f}`",
                 f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- val signal_coverage: `{val['signal_metrics'].get('signal_coverage', 0):.4f}`",
+                f"- val actionable_ece: `{_format_metric(val['probability_metrics'].get('actionable_expected_calibration_error'))}`",
                 f"- test macro_f1: `{test['metrics'].get('macro_f1', 0):.4f}`",
                 f"- test balanced_accuracy: `{test['metrics'].get('balanced_accuracy', 0):.4f}`",
                 f"- test actionable_f1: `{test['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- test signal_coverage: `{test['signal_metrics'].get('signal_coverage', 0):.4f}`",
+                f"- test actionable_ece: `{_format_metric(test['probability_metrics'].get('actionable_expected_calibration_error'))}`",
                 "",
             ]
         )
@@ -871,6 +1162,9 @@ def render_ablation_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_scenario: `{summary['best_scenario']}`",
+        f"- production_candidate: `{summary['production_candidate']['scenario_name']} / {summary['production_candidate']['model_name']}`",
+        f"- candidate val actionable_f1: `{summary['production_candidate']['validation']['actionable_f1']:.4f}`",
+        f"- candidate val actionable_ece: `{_format_metric(summary['production_candidate']['validation']['actionable_expected_calibration_error'])}`",
         "",
         "## Scenarios",
         "",
@@ -890,6 +1184,7 @@ def render_ablation_markdown_report(summary: dict) -> str:
                 f"- val macro_f1: `{val['metrics'].get('macro_f1', 0):.4f}`",
                 f"- val actionable_f1: `{val['signal_metrics'].get('actionable_f1', 0):.4f}`",
                 f"- val signal_coverage: `{val['signal_metrics'].get('signal_coverage', 0):.4f}`",
+                f"- val actionable_ece: `{_format_metric(val['probability_metrics'].get('actionable_expected_calibration_error'))}`",
                 "",
             ]
         )
@@ -905,6 +1200,9 @@ def render_walk_forward_markdown_report(summary: dict) -> str:
         f"- dataset_root: `{summary['dataset_root']}`",
         f"- decision_threshold: `{summary['decision_threshold']}`",
         f"- best_model: `{summary['best_model']}`",
+        f"- production_candidate: `{summary['production_candidate']['model_name']}`",
+        f"- candidate mean actionable_f1: `{summary['production_candidate']['validation_mean']['actionable_f1']:.4f}`",
+        f"- candidate mean actionable_ece: `{_format_metric(summary['production_candidate']['validation_mean']['actionable_expected_calibration_error'])}`",
         f"- fold_count: `{summary['fold_count']}`",
         "",
         "## Models",
@@ -919,9 +1217,13 @@ def render_walk_forward_markdown_report(summary: dict) -> str:
                 "",
                 f"- mean macro_f1: `{aggregate['validation_metrics_mean'].get('macro_f1', 0):.4f}`",
                 f"- mean balanced_accuracy: `{aggregate['validation_metrics_mean'].get('balanced_accuracy', 0):.4f}`",
+                f"- mean actionable_f1: `{aggregate['signal_metrics_mean'].get('actionable_f1', 0):.4f}`",
                 f"- mean signal_coverage: `{aggregate['signal_metrics_mean'].get('signal_coverage', 0):.4f}`",
+                f"- mean actionable_ece: `{_format_metric(aggregate['probability_metrics_mean'].get('actionable_expected_calibration_error'))}`",
                 f"- std macro_f1: `{aggregate['validation_metrics_std'].get('macro_f1', 0):.4f}`",
                 f"- std balanced_accuracy: `{aggregate['validation_metrics_std'].get('balanced_accuracy', 0):.4f}`",
+                f"- std actionable_f1: `{aggregate['signal_metrics_std'].get('actionable_f1', 0):.4f}`",
+                f"- std actionable_ece: `{_format_metric(aggregate['probability_metrics_std'].get('actionable_expected_calibration_error'))}`",
                 "",
             ]
         )
