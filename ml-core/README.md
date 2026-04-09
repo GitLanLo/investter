@@ -44,6 +44,7 @@ invest-ml materialize-feature-store --data-root ../data --ticker SBER --timefram
 invest-ml materialize-dataset --data-root ../data --output-root ../data/datasets --dataset-version v1 --ticker SBER
 invest-ml run-walk-forward-research --dataset-root ../data/datasets/dataset_version=v1 --output-root ../artifacts/research/walk_forward_v1
 invest-ml run-ablation-research --dataset-root ../data/datasets/dataset_version=v1 --output-root ../artifacts/research/ablation_v1
+invest-ml run-calibration-audit --model-dir ../artifacts/research/ablation_v1/no_cross_asset/rf_multiclass --output-root ../artifacts/research/calibration_audit_rf
 invest-ml run-research-pipeline --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/mvp_run --dataset-version mvp_v1 --ticker SBER --factor usdrub --factor brent --factor rtsi --timeframe 5m --run-ablation
 invest-ml tinkoff-sync-asset --data-root ../data --ticker SBER --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind share --class-code TQBR
 invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000UTSTOM --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind currency --class-code CETS
@@ -57,6 +58,8 @@ invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000
 - `core_price_volume_only`
 
 Для baseline/ablation research threshold теперь может подбираться только на validation и сохраняется в artifacts рядом с метриками модели.
+
+`run-calibration-audit` делает post-hoc audit по уже сохранённым `val/test_predictions.parquet` и сравнивает `identity`, `platt`, `isotonic` с отдельным production gate по precision/coverage/ECE.
 
 Текущий `mvp_universe_v1` использует:
 

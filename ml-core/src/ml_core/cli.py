@@ -19,6 +19,12 @@ from ml_core.pipelines.materialize import (
 from ml_core.pipelines.research import ResearchPipelineConfig, run_research_pipeline
 from ml_core.storage.layouts import ingest_asset_frame, ingest_factor_frame
 from ml_core.training.baselines import BaselineTrainingConfig, train_baseline_pack
+from ml_core.training.calibration import (
+    CalibrationAuditConfig,
+    DEFAULT_CALIBRATION_METHODS,
+    DEFAULT_CALIBRATION_THRESHOLD_GRID,
+    run_saved_model_calibration_audit,
+)
 from ml_core.training.research import (
     AblationResearchConfig,
     BaselineResearchConfig,
@@ -82,6 +88,15 @@ def main() -> None:
     run_ablation.add_argument("--output-root", required=True)
     run_ablation.add_argument("--decision-threshold", type=float, default=0.65)
     run_ablation.add_argument("--threshold", action="append", type=float, default=[])
+
+    run_calibration_audit = subparsers.add_parser("run-calibration-audit")
+    run_calibration_audit.add_argument("--model-dir", required=True)
+    run_calibration_audit.add_argument("--output-root", required=True)
+    run_calibration_audit.add_argument("--decision-threshold", type=float)
+    run_calibration_audit.add_argument("--threshold", action="append", type=float, default=[])
+    run_calibration_audit.add_argument("--method", action="append", default=[])
+    run_calibration_audit.add_argument("--calibration-bins", type=int, default=8)
+    run_calibration_audit.add_argument("--min-fit-rows", type=int, default=20)
 
     run_research_pipeline_cmd = subparsers.add_parser("run-research-pipeline")
     run_research_pipeline_cmd.add_argument("--data-root", required=True)
@@ -268,6 +283,23 @@ def main() -> None:
                 output_root=Path(args.output_root),
                 decision_threshold=args.decision_threshold,
                 threshold_grid=threshold_grid,
+            ),
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+        return
+
+    if args.command == "run-calibration-audit":
+        threshold_grid = tuple(args.threshold) if args.threshold else DEFAULT_CALIBRATION_THRESHOLD_GRID
+        methods = tuple(args.method) if args.method else DEFAULT_CALIBRATION_METHODS
+        summary = run_saved_model_calibration_audit(
+            Path(args.model_dir),
+            config=CalibrationAuditConfig(
+                output_root=Path(args.output_root),
+                decision_threshold=args.decision_threshold,
+                threshold_grid=threshold_grid,
+                calibration_bins=args.calibration_bins,
+                methods=methods,
+                min_fit_rows=args.min_fit_rows,
             ),
         )
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
