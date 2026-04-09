@@ -209,6 +209,29 @@ func TestMarketDataEndpoints(t *testing.T) {
 	}
 }
 
+func TestCORSPreflight(t *testing.T) {
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB:        &sql.DB{},
+		Container: app.Container{},
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/analysis/run", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("unexpected status for CORS preflight: %d", resp.Code)
+	}
+	if resp.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("unexpected allow-origin header: %q", resp.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if resp.Header().Get("Access-Control-Allow-Methods") == "" {
+		t.Fatal("expected allow-methods header")
+	}
+}
+
 type testAssetRepo struct {
 	assets map[string]domain.Asset
 }

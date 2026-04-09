@@ -458,7 +458,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		writeJSON(w, http.StatusOK, out)
 	})
 
-	return loggingMiddleware(mux)
+	return loggingMiddleware(corsMiddleware(mux))
 }
 
 func parseOptionalRFC3339(r *http.Request, key string) (time.Time, error) {

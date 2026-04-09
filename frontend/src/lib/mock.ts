@@ -9,7 +9,7 @@ export const mockDashboardData: DashboardData = {
   ],
   latestSignals: [
     {
-      id: 1,
+      id: "1",
       assetId: "SBER",
       direction: "up",
       state: "actionable",
@@ -21,7 +21,7 @@ export const mockDashboardData: DashboardData = {
       classProbabilities: { up_signal: 0.74, down_signal: 0.13, no_trade: 0.13 }
     },
     {
-      id: 2,
+      id: "2",
       assetId: "GAZP",
       direction: "down",
       state: "watch",

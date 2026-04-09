@@ -15,8 +15,10 @@ function mapAsset(dto: AssetDTO): AssetCard {
 }
 
 function mapSignal(dto: SignalDTO): SignalCard {
+  const stableId =
+    dto.id !== undefined ? String(dto.id) : `${dto.asset_id}:${dto.as_of_time}:${dto.model_version}`;
   return {
-    id: dto.id,
+    id: stableId,
     assetId: dto.asset_id,
     direction: dto.signal_direction,
     state: dto.signal_state,
@@ -40,13 +42,13 @@ async function fetchJson<T>(path: string): Promise<T> {
 export async function loadDashboardData(): Promise<DashboardData> {
   try {
     const [assets, signals] = await Promise.all([
-      fetchJson<AssetDTO[]>("/assets"),
+      fetchJson<{ items: AssetDTO[] }>("/assets"),
       fetchJson<{ items: SignalDTO[] }>("/signals/latest?limit=5"),
     ]);
 
     return {
       generatedFrom: "api",
-      assets: assets.map(mapAsset),
+      assets: assets.items.map(mapAsset),
       latestSignals: signals.items.map(mapSignal),
     };
   } catch {

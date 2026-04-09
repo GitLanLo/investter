@@ -8,7 +8,7 @@ export type AssetDTO = {
 };
 
 export type SignalDTO = {
-  id: number;
+  id?: number | string;
   asset_id: string;
   model_version: string;
   as_of_time: string;
@@ -19,7 +19,7 @@ export type SignalDTO = {
   threshold: number;
   timeframe: string;
   horizon_bars: number;
-  created_at: string;
+  created_at?: string;
 };
 
 export type AssetCard = {
@@ -32,7 +32,7 @@ export type AssetCard = {
 };
 
 export type SignalCard = {
-  id: number;
+  id: string;
   assetId: string;
   direction: string;
   state: string;
