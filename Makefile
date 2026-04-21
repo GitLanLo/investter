@@ -1,4 +1,4 @@
-.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke
+.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke
 
 backend-run:
 	cd backend && go run ./cmd/api
@@ -38,6 +38,8 @@ frontend-run:
 
 sprint2-check: backend-test frontend-build sprint2-smoke
 
+sprint3-check: backend-test frontend-build sprint3-smoke
+
 sprint2-smoke:
 	curl -fsS http://127.0.0.1:8080/health >/dev/null
 	curl -fsS http://127.0.0.1:8080/ready >/dev/null
@@ -45,3 +47,6 @@ sprint2-smoke:
 	curl -fsS 'http://127.0.0.1:8080/ml/research/documents' >/dev/null
 	curl -fsS 'http://127.0.0.1:8080/assets/SBER/signals?limit=5' >/dev/null
 	curl -fsSI http://127.0.0.1:5173/ >/dev/null
+
+sprint3-smoke: sprint2-smoke
+	curl -fsS 'http://127.0.0.1:8080/ml/policy/production' >/dev/null

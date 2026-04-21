@@ -13,6 +13,8 @@ import type {
   FactorPoint,
   MLOverview,
   ArtifactDocument,
+  ProductionPolicyDTO,
+  ProductionPolicySnapshot,
   ResearchOverviewDTO,
   ResearchDocumentsResponseDTO,
   ResearchDocumentDTO,
@@ -41,11 +43,12 @@ export function formatMetric(value: number | undefined, digits = 3): string {
 
 export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
   try {
-    const [documents, assets, signals, overview] = await Promise.all([
+    const [documents, assets, signals, overview, productionPolicy] = await Promise.all([
       fetchJson<ResearchDocumentsResponseDTO>("/ml/research/documents"),
       fetchJson<{ items: AssetDTO[] }>("/assets"),
       fetchJson<{ items: SignalDTO[] }>("/signals/latest?limit=12"),
       fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
+      fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
     ]);
 
     return {
@@ -53,6 +56,7 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       assets: assets.items.map(mapAsset),
       latestSignals: signals.items.map(mapSignal),
       mlOverview: mapResearchOverview(overview),
+      productionPolicy: mapProductionPolicy(productionPolicy),
       artifactDocuments: documents.items.map(mapResearchDocument),
     };
   } catch {
@@ -186,6 +190,37 @@ function mapResearchDocument(dto: ResearchDocumentDTO): ArtifactDocument {
       content.length > artifactPreviewLimit
         ? `${content.slice(0, artifactPreviewLimit)}\n\n... truncated in UI preview (${content.length} chars total)`
         : content,
+  };
+}
+
+function mapProductionPolicy(dto: ProductionPolicyDTO): ProductionPolicySnapshot {
+  return {
+    generatedAt: dto.generated_at,
+    status: dto.policy_status,
+    modelName: dto.model_name,
+    scenarioName: dto.scenario_name,
+    calibrationMethod: dto.calibration_method,
+    threshold: dto.threshold,
+    timeframe: dto.timeframe,
+    horizonBars: dto.horizon_bars,
+    datasetVersion: dto.dataset_version,
+    featureSchema: dto.feature_schema,
+    trainRows: dto.train_rows,
+    validationRows: dto.validation_rows,
+    testRows: dto.test_rows,
+    validation: mapProductionPolicyMetrics(dto.validation),
+    test: mapProductionPolicyMetrics(dto.test),
+    sourcePaths: dto.source_paths ?? {},
+    warnings: dto.warnings ?? [],
+  };
+}
+
+function mapProductionPolicyMetrics(raw: ProductionPolicyDTO["validation"]) {
+  return {
+    actionableF1: raw.actionable_f1,
+    precision: raw.precision,
+    coverage: raw.coverage,
+    actionableEce: raw.actionable_ece,
   };
 }
 

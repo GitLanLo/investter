@@ -341,10 +341,10 @@ func TestResearchDocumentsEndpoint(t *testing.T) {
 		"calibration_run",
 		"summary.json",
 	), map[string]any{
-		"model_dir":             "artifacts/research/test_live/core_price_volume_only/hgb_multiclass",
-		"production_candidate":  map[string]any{"method": "platt"},
-		"research_candidate":    map[string]any{"method": "identity"},
-		"methods":               map[string]any{"platt": map[string]any{"available": true}},
+		"model_dir":            "artifacts/research/test_live/core_price_volume_only/hgb_multiclass",
+		"production_candidate": map[string]any{"method": "platt"},
+		"research_candidate":   map[string]any{"method": "identity"},
+		"methods":              map[string]any{"platt": map[string]any{"available": true}},
 	})
 	writeTextFile(t, filepath.Join(researchRoot, "calibration_run", "report.md"), "# Calibration report\n\nPlatt wins.")
 
@@ -380,6 +380,100 @@ func TestResearchDocumentsEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(payload.Items[3].Content, "Best scenario") {
 		t.Fatalf("unexpected research report content: %q", payload.Items[3].Content)
+	}
+}
+
+func TestProductionPolicyEndpoint(t *testing.T) {
+	dataRoot := t.TempDir()
+	researchRoot := t.TempDir()
+
+	writeJSONFile(t, filepath.Join(
+		dataRoot,
+		"datasets",
+		"dataset_version=test_live",
+		"manifest.json",
+	), map[string]any{
+		"dataset_version":        "test_live",
+		"feature_schema_version": "feature_v1",
+		"timeframe":              "5m",
+		"horizon_bars":           12,
+		"train_range":            map[string]any{"rows": 100},
+		"val_range":              map[string]any{"rows": 20},
+		"test_range":             map[string]any{"rows": 30},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"ablation_run",
+		"summary.json",
+	), map[string]any{
+		"production_candidate": map[string]any{
+			"scenario_name":      "core_price_volume_only",
+			"model_name":         "hgb_multiclass",
+			"selected_threshold": 0.55,
+			"validation_gate":    map[string]any{"passed": true},
+		},
+		"research_candidate": map[string]any{"scenario_name": "no_regime"},
+		"scenarios":          map[string]any{"core_price_volume_only": map[string]any{}},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"calibration_run",
+		"summary.json",
+	), map[string]any{
+		"model_dir": "artifacts/research/test_live/core_price_volume_only/hgb_multiclass",
+		"production_candidate": map[string]any{
+			"method":             "platt",
+			"selected_threshold": 0.30,
+			"validation_gate":    map[string]any{"passed": true},
+			"validation": map[string]any{
+				"actionable_f1":                         0.36,
+				"precision_actionable_signal":           0.37,
+				"signal_coverage":                       0.54,
+				"actionable_expected_calibration_error": 0.01,
+			},
+			"test": map[string]any{
+				"actionable_f1":                         0.27,
+				"precision_actionable_signal":           0.25,
+				"signal_coverage":                       0.48,
+				"actionable_expected_calibration_error": 0.12,
+			},
+		},
+		"research_candidate": map[string]any{"method": "identity"},
+		"methods":            map[string]any{"platt": map[string]any{"available": true}},
+	})
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Research: service.NewResearchArtifactsService(dataRoot, researchRoot),
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ml/policy/production", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/policy/production: %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload mlProductionPolicyResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode production policy: %v", err)
+	}
+	if payload.PolicyStatus != "production_candidate" {
+		t.Fatalf("unexpected policy status: %+v", payload)
+	}
+	if payload.ModelName != "hgb_multiclass" || payload.CalibrationMethod != "platt" {
+		t.Fatalf("unexpected production policy identity: %+v", payload)
+	}
+	if payload.Threshold != 0.30 || payload.Validation.ActionableECE != 0.01 {
+		t.Fatalf("unexpected production policy metrics: %+v", payload)
+	}
+	if payload.DatasetVersion != "test_live" || payload.TestRows != 30 {
+		t.Fatalf("unexpected dataset metadata: %+v", payload)
 	}
 }
 

@@ -258,6 +258,42 @@
 }
 ```
 
+### `GET /ml/policy/production`
+
+- назначение: normalized production-candidate policy для Sprint 3 runtime/GUI слоя
+- status: implemented
+- response example:
+
+```json
+{
+  "generated_at": "2026-04-15T00:00:00Z",
+  "policy_status": "production_candidate",
+  "model_name": "hgb_multiclass",
+  "scenario_name": "core_price_volume_only",
+  "calibration_method": "platt",
+  "threshold": 0.3,
+  "timeframe": "5m",
+  "horizon_bars": 12,
+  "dataset_version": "mvp_live_wf_20260409",
+  "feature_schema": "feature_v1",
+  "train_rows": 7247,
+  "validation_rows": 1535,
+  "test_rows": 1540,
+  "validation": {
+    "actionable_f1": 0.3659,
+    "precision": 0.3655,
+    "coverage": 0.5401,
+    "actionable_ece": 0.0098
+  },
+  "test": {
+    "actionable_f1": 0.2686,
+    "precision": 0.252,
+    "coverage": 0.4792,
+    "actionable_ece": 0.1155
+  }
+}
+```
+
 ### `GET /watchlist`
 
 - назначение: список наблюдаемых инструментов

@@ -18,6 +18,7 @@ import type {
   CandidateSnapshot,
   CandleBar,
   FactorPoint,
+  ProductionPolicySnapshot,
   ScenarioSnapshot,
   SignalCard,
   WorkspaceShellData,
@@ -138,6 +139,7 @@ export function App() {
   const selectedSignal =
     signals.find((signal) => signal.assetId === selectedAsset?.id) ?? signals[0] ?? null;
   const overview = shellData?.mlOverview;
+  const productionPolicy = shellData?.productionPolicy;
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
   const baseCandles = workbenchData?.candles ?? emptyCandles;
   const baseFactors = workbenchData?.factors ?? emptyFactors;
@@ -425,6 +427,7 @@ export function App() {
             </span>
           </div>
           <div className="candidate-grid">
+            <ProductionPolicyCard policy={productionPolicy} />
             <CandidateCard title="Research best" candidate={overview?.research?.researchCandidate} />
             <CandidateCard title="Production gate" candidate={overview?.research?.productionCandidate} />
             <CandidateCard title="Calibration gate" candidate={overview?.calibration?.productionCandidate} />
@@ -748,6 +751,31 @@ function CandidateCard({ title, candidate }: { title: string; candidate?: Candid
           {formatMetric(candidate.test.actionableF1, 3)}
         </p>
       ) : null}
+    </article>
+  );
+}
+
+function ProductionPolicyCard({ policy }: { policy?: ProductionPolicySnapshot }) {
+  return (
+    <article className="candidate-card production-policy-card">
+      <p className="candidate-title">Sprint 3 policy</p>
+      <h4>{policy?.status ?? "loading policy"}</h4>
+      <p className="candidate-meta">
+        {policy
+          ? `${policy.scenarioName || "n/a"} / ${policy.modelName || "n/a"} · ${policy.calibrationMethod || "n/a"}`
+          : "Production policy endpoint is loading."}
+      </p>
+      <div className="candidate-metrics">
+        <Metric label="Threshold" value={formatProbability(policy?.threshold)} />
+        <Metric label="Val F1" value={formatMetric(policy?.validation.actionableF1, 3)} />
+        <Metric label="Val ECE" value={formatMetric(policy?.validation.actionableEce, 3)} />
+        <Metric label="Coverage" value={formatMetric(policy?.validation.coverage, 3)} />
+      </div>
+      <p className="candidate-gate">
+        {policy
+          ? `${policy.datasetVersion || "dataset n/a"} · ${policy.timeframe || "n/a"} · horizon ${policy.horizonBars || 0}`
+          : "Waiting for backend policy snapshot."}
+      </p>
     </article>
   );
 }

@@ -59,6 +59,33 @@ export type ResearchDocumentsResponseDTO = {
   items: ResearchDocumentDTO[];
 };
 
+export type ProductionPolicyDTO = {
+  generated_at: string;
+  policy_status: string;
+  model_name: string;
+  scenario_name: string;
+  calibration_method: string;
+  threshold: number;
+  timeframe: string;
+  horizon_bars: number;
+  dataset_version: string;
+  feature_schema: string;
+  train_rows: number;
+  validation_rows: number;
+  test_rows: number;
+  validation: ProductionPolicyMetricsDTO;
+  test: ProductionPolicyMetricsDTO;
+  source_paths?: Record<string, string>;
+  warnings?: string[];
+};
+
+export type ProductionPolicyMetricsDTO = {
+  actionable_f1: number;
+  precision: number;
+  coverage: number;
+  actionable_ece: number;
+};
+
 export type AssetCard = {
   id: string;
   ticker: string;
@@ -163,6 +190,26 @@ export type MLOverview = {
   };
 };
 
+export type ProductionPolicySnapshot = {
+  generatedAt: string;
+  status: string;
+  modelName: string;
+  scenarioName: string;
+  calibrationMethod: string;
+  threshold: number;
+  timeframe: string;
+  horizonBars: number;
+  datasetVersion: string;
+  featureSchema: string;
+  trainRows: number;
+  validationRows: number;
+  testRows: number;
+  validation: CandidateMetrics;
+  test: CandidateMetrics;
+  sourcePaths: Record<string, string>;
+  warnings: string[];
+};
+
 export type ArtifactDocument = {
   key: string;
   title: string;
@@ -175,6 +222,7 @@ export type WorkspaceShellData = {
   assets: AssetCard[];
   latestSignals: SignalCard[];
   mlOverview: MLOverview;
+  productionPolicy: ProductionPolicySnapshot;
   artifactDocuments: ArtifactDocument[];
   generatedFrom: "api" | "mock";
 };

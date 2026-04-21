@@ -1180,8 +1180,15 @@ a {
 .candidate-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
+}
+
+.production-policy-card {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(208, 105, 49, 0.18), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(243, 230, 213, 0.76));
+  border-color: rgba(208, 105, 49, 0.22);
 }
 
 .candidate-title,

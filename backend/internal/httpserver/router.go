@@ -133,8 +133,8 @@ type mlResearchOverviewResponse struct {
 }
 
 type mlResearchDocumentsResponse struct {
-	GeneratedAt string                      `json:"generated_at"`
-	Items       []mlResearchDocumentDTO     `json:"items"`
+	GeneratedAt string                  `json:"generated_at"`
+	Items       []mlResearchDocumentDTO `json:"items"`
 }
 
 type mlResearchDocumentDTO struct {
@@ -143,6 +143,33 @@ type mlResearchDocumentDTO struct {
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
 	Content     string `json:"content"`
+}
+
+type mlProductionPolicyResponse struct {
+	GeneratedAt       string                       `json:"generated_at"`
+	PolicyStatus      string                       `json:"policy_status"`
+	ModelName         string                       `json:"model_name"`
+	ScenarioName      string                       `json:"scenario_name"`
+	CalibrationMethod string                       `json:"calibration_method"`
+	Threshold         float64                      `json:"threshold"`
+	Timeframe         string                       `json:"timeframe"`
+	HorizonBars       int                          `json:"horizon_bars"`
+	DatasetVersion    string                       `json:"dataset_version"`
+	FeatureSchema     string                       `json:"feature_schema"`
+	TrainRows         int                          `json:"train_rows"`
+	ValidationRows    int                          `json:"validation_rows"`
+	TestRows          int                          `json:"test_rows"`
+	Validation        mlProductionPolicyMetricsDTO `json:"validation"`
+	Test              mlProductionPolicyMetricsDTO `json:"test"`
+	SourcePaths       map[string]string            `json:"source_paths,omitempty"`
+	Warnings          []string                     `json:"warnings,omitempty"`
+}
+
+type mlProductionPolicyMetricsDTO struct {
+	ActionableF1  float64 `json:"actionable_f1"`
+	Precision     float64 `json:"precision"`
+	Coverage      float64 `json:"coverage"`
+	ActionableECE float64 `json:"actionable_ece"`
 }
 
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
@@ -571,6 +598,25 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		writeJSON(w, http.StatusOK, out)
 	})
 
+	mux.HandleFunc("/ml/policy/production", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		if deps.Container.Services.Research == nil {
+			writeError(w, http.StatusServiceUnavailable, "production_policy_unavailable", "research policy service is not configured", nil)
+			return
+		}
+
+		policy, err := deps.Container.Services.Research.LoadProductionPolicy(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "production_policy_failed", err.Error(), nil)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, toProductionPolicyDTO(policy))
+	})
+
 	return loggingMiddleware(corsMiddleware(mux))
 }
 
@@ -630,5 +676,36 @@ func toSignalDTO(run domain.SignalRun) signalDTO {
 		Threshold:    run.Threshold,
 		Timeframe:    run.Timeframe,
 		HorizonBars:  run.HorizonBars,
+	}
+}
+
+func toProductionPolicyDTO(policy service.ProductionPolicySnapshot) mlProductionPolicyResponse {
+	return mlProductionPolicyResponse{
+		GeneratedAt:       policy.GeneratedAt.UTC().Format(time.RFC3339),
+		PolicyStatus:      policy.PolicyStatus,
+		ModelName:         policy.ModelName,
+		ScenarioName:      policy.ScenarioName,
+		CalibrationMethod: policy.CalibrationMethod,
+		Threshold:         policy.Threshold,
+		Timeframe:         policy.Timeframe,
+		HorizonBars:       policy.HorizonBars,
+		DatasetVersion:    policy.DatasetVersion,
+		FeatureSchema:     policy.FeatureSchema,
+		TrainRows:         policy.TrainRows,
+		ValidationRows:    policy.ValidationRows,
+		TestRows:          policy.TestRows,
+		Validation:        toProductionPolicyMetricsDTO(policy.Validation),
+		Test:              toProductionPolicyMetricsDTO(policy.Test),
+		SourcePaths:       policy.SourcePaths,
+		Warnings:          policy.Warnings,
+	}
+}
+
+func toProductionPolicyMetricsDTO(metrics service.ProductionPolicyMetrics) mlProductionPolicyMetricsDTO {
+	return mlProductionPolicyMetricsDTO{
+		ActionableF1:  metrics.ActionableF1,
+		Precision:     metrics.Precision,
+		Coverage:      metrics.Coverage,
+		ActionableECE: metrics.ActionableECE,
 	}
 }

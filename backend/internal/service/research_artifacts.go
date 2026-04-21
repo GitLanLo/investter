@@ -26,6 +26,33 @@ type ResearchArtifactDocument struct {
 	Content     string
 }
 
+type ProductionPolicySnapshot struct {
+	GeneratedAt       time.Time
+	PolicyStatus      string
+	ModelName         string
+	ScenarioName      string
+	CalibrationMethod string
+	Threshold         float64
+	Timeframe         string
+	HorizonBars       int
+	DatasetVersion    string
+	FeatureSchema     string
+	TrainRows         int
+	ValidationRows    int
+	TestRows          int
+	Validation        ProductionPolicyMetrics
+	Test              ProductionPolicyMetrics
+	SourcePaths       map[string]string
+	Warnings          []string
+}
+
+type ProductionPolicyMetrics struct {
+	ActionableF1  float64
+	Precision     float64
+	Coverage      float64
+	ActionableECE float64
+}
+
 type ResearchArtifactsService struct {
 	dataRoot     string
 	researchRoot string
@@ -197,6 +224,63 @@ func (s *ResearchArtifactsService) LoadDocuments(ctx context.Context) ([]Researc
 	return documents, nil
 }
 
+func (s *ResearchArtifactsService) LoadProductionPolicy(ctx context.Context) (ProductionPolicySnapshot, error) {
+	overview, err := s.LoadOverview(ctx)
+	if err != nil {
+		return ProductionPolicySnapshot{}, err
+	}
+
+	policy := ProductionPolicySnapshot{
+		GeneratedAt:  overview.GeneratedAt,
+		PolicyStatus: "incomplete",
+		SourcePaths:  overview.SourcePaths,
+		Warnings:     append([]string{}, overview.Warnings...),
+	}
+
+	dataset := overview.DatasetManifest
+	policy.DatasetVersion = stringField(dataset, "dataset_version")
+	policy.FeatureSchema = stringField(dataset, "feature_schema_version")
+	policy.Timeframe = stringField(dataset, "timeframe")
+	policy.HorizonBars = intField(dataset, "horizon_bars")
+	policy.TrainRows = intField(mapField(dataset, "train_range"), "rows")
+	policy.ValidationRows = intField(mapField(dataset, "val_range"), "rows")
+	policy.TestRows = intField(mapField(dataset, "test_range"), "rows")
+
+	researchCandidate := mapField(overview.ResearchSummary, "production_candidate")
+	calibrationCandidate := mapField(overview.CalibrationSummary, "production_candidate")
+	if researchCandidate == nil {
+		policy.Warnings = append(policy.Warnings, "research production_candidate is missing")
+	}
+	if calibrationCandidate == nil {
+		policy.Warnings = append(policy.Warnings, "calibration production_candidate is missing")
+	}
+
+	policy.ModelName = stringField(researchCandidate, "model_name")
+	policy.ScenarioName = stringField(researchCandidate, "scenario_name")
+	policy.CalibrationMethod = stringField(calibrationCandidate, "method")
+	policy.Threshold = floatField(calibrationCandidate, "selected_threshold")
+	if policy.Threshold == 0 {
+		policy.Threshold = floatField(researchCandidate, "selected_threshold")
+	}
+	policy.Validation = productionPolicyMetrics(mapField(calibrationCandidate, "validation"))
+	policy.Test = productionPolicyMetrics(mapField(calibrationCandidate, "test"))
+
+	researchGatePassed := boolField(mapField(researchCandidate, "validation_gate"), "passed")
+	calibrationGatePassed := boolField(mapField(calibrationCandidate, "validation_gate"), "passed")
+	switch {
+	case researchCandidate == nil || calibrationCandidate == nil:
+		policy.PolicyStatus = "incomplete"
+	case researchGatePassed && calibrationGatePassed:
+		policy.PolicyStatus = "production_candidate"
+	case researchGatePassed:
+		policy.PolicyStatus = "calibration_review"
+	default:
+		policy.PolicyStatus = "research_review"
+	}
+
+	return policy, nil
+}
+
 func findLatestJSON(
 	ctx context.Context,
 	root string,
@@ -293,4 +377,84 @@ func siblingReportPath(path string) string {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(path), "report.md")
+}
+
+func productionPolicyMetrics(payload map[string]any) ProductionPolicyMetrics {
+	signalMetrics := mapField(payload, "signal_metrics")
+	probabilityMetrics := mapField(payload, "probability_metrics")
+
+	return ProductionPolicyMetrics{
+		ActionableF1:  firstFloatField(payload, signalMetrics, "actionable_f1"),
+		Precision:     firstFloatField(payload, signalMetrics, "precision_actionable_signal"),
+		Coverage:      firstFloatField(payload, signalMetrics, "signal_coverage"),
+		ActionableECE: firstFloatField(payload, probabilityMetrics, "actionable_expected_calibration_error"),
+	}
+}
+
+func firstFloatField(primary map[string]any, secondary map[string]any, key string) float64 {
+	if value := floatField(primary, key); value != 0 {
+		return value
+	}
+	return floatField(secondary, key)
+}
+
+func mapField(payload map[string]any, key string) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	value, ok := payload[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return value
+}
+
+func stringField(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, _ := payload[key].(string)
+	return value
+}
+
+func intField(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	switch value := payload[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
+}
+
+func floatField(payload map[string]any, key string) float64 {
+	if payload == nil {
+		return 0
+	}
+	switch value := payload[key].(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	default:
+		return 0
+	}
+}
+
+func boolField(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	value, _ := payload[key].(bool)
+	return value
 }

@@ -176,6 +176,38 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
       ],
     },
   },
+  productionPolicy: {
+    generatedAt: "2026-04-10T10:05:00Z",
+    status: "production_candidate",
+    modelName: "hgb_multiclass",
+    scenarioName: "core_price_volume_only",
+    calibrationMethod: "platt",
+    threshold: 0.3,
+    timeframe: "5m",
+    horizonBars: 12,
+    datasetVersion: "mvp_live_wf_20260409",
+    featureSchema: "feature_v1",
+    trainRows: 7247,
+    validationRows: 1535,
+    testRows: 1540,
+    validation: {
+      actionableF1: 0.366,
+      precision: 0.366,
+      coverage: 0.54,
+      actionableEce: 0.01,
+    },
+    test: {
+      actionableF1: 0.269,
+      precision: 0.252,
+      coverage: 0.479,
+      actionableEce: 0.115,
+    },
+    sourcePaths: {
+      research_summary: "artifacts/research/mvp_live_wf_20260409/ablation_sprint2_richer_modelpack/summary.json",
+      calibration_summary: "artifacts/research/mvp_live_wf_20260409/calibration_audit_hgb_core_price_volume/summary.json",
+    },
+    warnings: [],
+  },
   artifactDocuments: [
     {
       key: "dataset_manifest",
