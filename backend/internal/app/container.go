@@ -12,7 +12,7 @@ type Container struct {
 	Services service.Services
 }
 
-func NewContainer(db *sql.DB, mlDataRoot string) Container {
+func NewContainer(db *sql.DB, mlDataRoot string, mlResearchRoot string) Container {
 	assetRepo := postgres.NewAssetRepository(db)
 	marketDataRepo := filesystem.NewMarketDataRepository(mlDataRoot)
 	watchlistRepo := postgres.NewWatchlistRepository(db)
@@ -20,6 +20,6 @@ func NewContainer(db *sql.DB, mlDataRoot string) Container {
 	signalRepo := postgres.NewSignalRunRepository(db)
 
 	return Container{
-		Services: service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo),
+		Services: service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo, mlDataRoot, mlResearchRoot),
 	}
 }

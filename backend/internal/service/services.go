@@ -10,6 +10,7 @@ type Services struct {
 	Watchlist  *WatchlistService
 	Models     *ModelRegistryService
 	Analysis   *AnalysisService
+	Research   *ResearchArtifactsService
 }
 
 func NewServices(
@@ -18,6 +19,8 @@ func NewServices(
 	watchlistRepo repository.WatchlistRepository,
 	modelRepo repository.ModelRegistryRepository,
 	signalRepo repository.SignalRunRepository,
+	mlDataRoot string,
+	mlResearchRoot string,
 ) Services {
 	return Services{
 		Assets:     NewAssetService(assetRepo),
@@ -25,5 +28,6 @@ func NewServices(
 		Watchlist:  NewWatchlistService(watchlistRepo),
 		Models:     NewModelRegistryService(modelRepo),
 		Analysis:   NewAnalysisService(assetRepo, modelRepo, signalRepo),
+		Research:   NewResearchArtifactsService(mlDataRoot, mlResearchRoot),
 	}
 }

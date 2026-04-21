@@ -123,6 +123,28 @@ type signalProbabilitiesDTO struct {
 	NoTrade float64 `json:"no_trade"`
 }
 
+type mlResearchOverviewResponse struct {
+	GeneratedAt        string            `json:"generated_at"`
+	DatasetManifest    map[string]any    `json:"dataset_manifest,omitempty"`
+	ResearchSummary    map[string]any    `json:"research_summary,omitempty"`
+	CalibrationSummary map[string]any    `json:"calibration_summary,omitempty"`
+	SourcePaths        map[string]string `json:"source_paths,omitempty"`
+	Warnings           []string          `json:"warnings,omitempty"`
+}
+
+type mlResearchDocumentsResponse struct {
+	GeneratedAt string                      `json:"generated_at"`
+	Items       []mlResearchDocumentDTO     `json:"items"`
+}
+
+type mlResearchDocumentDTO struct {
+	Key         string `json:"key"`
+	Title       string `json:"title"`
+	Path        string `json:"path"`
+	ContentType string `json:"content_type"`
+	Content     string `json:"content"`
+}
+
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 
@@ -254,6 +276,39 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			})
 		}
 
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/assets/{id}/signals", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		limit := 20
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+
+		items, err := deps.Container.Services.Analysis.ListByAsset(
+			r.Context(),
+			r.PathValue("id"),
+			limit,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "signals_list_failed", err.Error(), nil)
+			return
+		}
+
+		out := signalsResponse{Items: make([]signalDTO, 0, len(items))}
+		for _, item := range items {
+			out.Items = append(out.Items, toSignalDTO(item))
+		}
 		writeJSON(w, http.StatusOK, out)
 	})
 
@@ -454,6 +509,64 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		out := signalsResponse{Items: make([]signalDTO, 0, len(items))}
 		for _, item := range items {
 			out.Items = append(out.Items, toSignalDTO(item))
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/ml/research/overview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		if deps.Container.Services.Research == nil {
+			writeError(w, http.StatusServiceUnavailable, "research_overview_unavailable", "research overview service is not configured", nil)
+			return
+		}
+
+		overview, err := deps.Container.Services.Research.LoadOverview(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "research_overview_failed", err.Error(), nil)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, mlResearchOverviewResponse{
+			GeneratedAt:        overview.GeneratedAt.UTC().Format(time.RFC3339),
+			DatasetManifest:    overview.DatasetManifest,
+			ResearchSummary:    overview.ResearchSummary,
+			CalibrationSummary: overview.CalibrationSummary,
+			SourcePaths:        overview.SourcePaths,
+			Warnings:           overview.Warnings,
+		})
+	})
+
+	mux.HandleFunc("/ml/research/documents", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		if deps.Container.Services.Research == nil {
+			writeError(w, http.StatusServiceUnavailable, "research_documents_unavailable", "research documents service is not configured", nil)
+			return
+		}
+
+		items, err := deps.Container.Services.Research.LoadDocuments(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "research_documents_failed", err.Error(), nil)
+			return
+		}
+
+		out := mlResearchDocumentsResponse{
+			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+			Items:       make([]mlResearchDocumentDTO, 0, len(items)),
+		}
+		for _, item := range items {
+			out.Items = append(out.Items, mlResearchDocumentDTO{
+				Key:         item.Key,
+				Title:       item.Title,
+				Path:        item.Path,
+				ContentType: item.ContentType,
+				Content:     item.Content,
+			})
 		}
 		writeJSON(w, http.StatusOK, out)
 	})

@@ -1,12 +1,20 @@
 # frontend
 
-Frontend workspace для Sprint 1.
+Frontend workspace для Sprint 2 operator GUI.
 
 ## Что есть сейчас
 
 - `Vite + React + TypeScript` app shell;
 - fallback на mock data, если backend недоступен;
 - typed API/domain mapping в `src/lib/api.ts`;
+- interactive candle workbench:
+  - zoom / pan
+  - brush-selection по диапазону
+  - timeframe switch
+  - detached chart window;
+- synced factor strip и signal overlay;
+- artifact browser для latest dataset/research/calibration documents;
+- asset signal history panel;
 - prep pack в `docs/`:
   - `screen-map.md`
   - `wireframes.md`
@@ -29,8 +37,9 @@ npm run build
 
 - `VITE_API_BASE_URL` — базовый URL backend API, по умолчанию `http://localhost:8080`.
 
-## Sprint 1 scope
+## Sprint 2 scope
 
-- app shell стартует локально и не блокирует ML/backend;
-- IA, wireframes и DTO mapping зафиксированы под Sprint 2;
-- production-grade routing и полноценный typed client откладываются на следующий спринт.
+- operator GUI работает поверх реального backend API;
+- chart/workbench уже связан с ML artifact layer и signal history;
+- при недоступности backend UI остаётся функциональным через mock fallback;
+- полноценные auth, notifications workflow и multi-run artifact navigation остаются следующим слоем.

@@ -101,6 +101,25 @@ func TestAnalysisEndpoints(t *testing.T) {
 	if listed.Items[0].AssetID != "SBER" {
 		t.Fatalf("unexpected listed asset_id: %s", listed.Items[0].AssetID)
 	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/assets/SBER/signals?limit=10", nil)
+	historyResp := httptest.NewRecorder()
+	router.ServeHTTP(historyResp, historyReq)
+
+	if historyResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /assets/SBER/signals: %d body=%s", historyResp.Code, historyResp.Body.String())
+	}
+
+	var history signalsResponse
+	if err := json.Unmarshal(historyResp.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode signal history: %v", err)
+	}
+	if len(history.Items) != 1 {
+		t.Fatalf("expected 1 history item, got %d", len(history.Items))
+	}
+	if history.Items[0].AssetID != "SBER" {
+		t.Fatalf("unexpected history asset_id: %s", history.Items[0].AssetID)
+	}
 }
 
 func TestMarketDataEndpoints(t *testing.T) {
@@ -206,6 +225,161 @@ func TestMarketDataEndpoints(t *testing.T) {
 	}
 	if factors.Items[0].Factor != "brent" || factors.Items[1].Factor != "usdrub" {
 		t.Fatalf("unexpected factor ordering: %+v", factors.Items)
+	}
+}
+
+func TestResearchOverviewEndpoint(t *testing.T) {
+	dataRoot := t.TempDir()
+	researchRoot := t.TempDir()
+
+	writeJSONFile(t, filepath.Join(
+		dataRoot,
+		"datasets",
+		"dataset_version=test_live",
+		"manifest.json",
+	), map[string]any{
+		"dataset_version":        "test_live",
+		"feature_schema_version": "feature_v1",
+		"timeframe":              "5m",
+		"horizon_bars":           12,
+		"tickers":                []string{"SBER", "GAZP"},
+		"train_range":            map[string]any{"rows": 100},
+		"val_range":              map[string]any{"rows": 20},
+		"test_range":             map[string]any{"rows": 20},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"ablation_run",
+		"summary.json",
+	), map[string]any{
+		"production_candidate": map[string]any{
+			"scenario_name": "core_price_volume_only",
+			"model_name":    "hgb_multiclass",
+		},
+		"research_candidate": map[string]any{
+			"scenario_name": "no_regime",
+			"model_name":    "hgb_multiclass",
+		},
+		"scenarios": map[string]any{
+			"core_price_volume_only": map[string]any{},
+		},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"calibration_run",
+		"summary.json",
+	), map[string]any{
+		"model_dir": "artifacts/research/test_live/core_price_volume_only/hgb_multiclass",
+		"production_candidate": map[string]any{
+			"method": "platt",
+		},
+		"research_candidate": map[string]any{
+			"method": "identity",
+		},
+		"methods": map[string]any{
+			"platt": map[string]any{"available": true},
+		},
+	})
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Research: service.NewResearchArtifactsService(dataRoot, researchRoot),
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ml/research/overview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/research/overview: %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload mlResearchOverviewResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode research overview: %v", err)
+	}
+	if payload.DatasetManifest["dataset_version"] != "test_live" {
+		t.Fatalf("unexpected dataset version: %+v", payload.DatasetManifest)
+	}
+	if payload.ResearchSummary["production_candidate"].(map[string]any)["scenario_name"] != "core_price_volume_only" {
+		t.Fatalf("unexpected research summary: %+v", payload.ResearchSummary)
+	}
+	if payload.CalibrationSummary["production_candidate"].(map[string]any)["method"] != "platt" {
+		t.Fatalf("unexpected calibration summary: %+v", payload.CalibrationSummary)
+	}
+}
+
+func TestResearchDocumentsEndpoint(t *testing.T) {
+	dataRoot := t.TempDir()
+	researchRoot := t.TempDir()
+
+	writeJSONFile(t, filepath.Join(
+		dataRoot,
+		"datasets",
+		"dataset_version=test_live",
+		"manifest.json",
+	), map[string]any{
+		"dataset_version":        "test_live",
+		"feature_schema_version": "feature_v1",
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"ablation_run",
+		"summary.json",
+	), map[string]any{
+		"production_candidate": map[string]any{"scenario_name": "core_price_volume_only"},
+		"research_candidate":   map[string]any{"scenario_name": "no_regime"},
+		"scenarios":            map[string]any{"core_price_volume_only": map[string]any{}},
+	})
+	writeTextFile(t, filepath.Join(researchRoot, "ablation_run", "report.md"), "# Research report\n\nBest scenario.")
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"calibration_run",
+		"summary.json",
+	), map[string]any{
+		"model_dir":             "artifacts/research/test_live/core_price_volume_only/hgb_multiclass",
+		"production_candidate":  map[string]any{"method": "platt"},
+		"research_candidate":    map[string]any{"method": "identity"},
+		"methods":               map[string]any{"platt": map[string]any{"available": true}},
+	})
+	writeTextFile(t, filepath.Join(researchRoot, "calibration_run", "report.md"), "# Calibration report\n\nPlatt wins.")
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Research: service.NewResearchArtifactsService(dataRoot, researchRoot),
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ml/research/documents", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/research/documents: %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload mlResearchDocumentsResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode research documents: %v", err)
+	}
+	if len(payload.Items) != 5 {
+		t.Fatalf("unexpected documents count: %d", len(payload.Items))
+	}
+	if payload.Items[0].Key != "dataset_manifest" {
+		t.Fatalf("unexpected first document: %+v", payload.Items[0])
+	}
+	if payload.Items[3].Key != "research_report" || payload.Items[3].ContentType != "markdown" {
+		t.Fatalf("unexpected research report document: %+v", payload.Items[3])
+	}
+	if !strings.Contains(payload.Items[3].Content, "Best scenario") {
+		t.Fatalf("unexpected research report content: %q", payload.Items[3].Content)
 	}
 }
 
@@ -355,6 +529,19 @@ func (r *testSignalRepo) ListLatest(_ context.Context, limit int) ([]domain.Sign
 	return out, nil
 }
 
+func (r *testSignalRepo) ListByAsset(_ context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+	filtered := make([]domain.SignalRun, 0, len(r.items))
+	for i := len(r.items) - 1; i >= 0; i-- {
+		if r.items[i].AssetID == assetID {
+			filtered = append(filtered, r.items[i])
+		}
+		if len(filtered) == limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
 var _ repository.AssetRepository = (*testAssetRepo)(nil)
 var _ repository.WatchlistRepository = (*testWatchlistRepo)(nil)
 var _ repository.ModelRegistryRepository = (*testModelRepo)(nil)
@@ -405,6 +592,30 @@ func writeTestFactorParquet(t *testing.T, path string, rows []testFactorRow) {
 	}
 	if err := parquet.WriteFile(path, rows); err != nil {
 		t.Fatalf("write factor parquet: %v", err)
+	}
+}
+
+func writeJSONFile(t *testing.T, path string, payload map[string]any) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir json dir: %v", err)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal json payload: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write json file: %v", err)
+	}
+}
+
+func writeTextFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir text dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write text file: %v", err)
 	}
 }
 

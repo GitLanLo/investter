@@ -110,3 +110,59 @@ func (r *SignalRunRepository) ListLatest(ctx context.Context, limit int) ([]doma
 
 	return items, rows.Err()
 }
+
+func (r *SignalRunRepository) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			id,
+			asset_id,
+			model_version,
+			as_of_time,
+			signal_state,
+			signal_direction,
+			signal_probability,
+			class_probabilities,
+			threshold,
+			timeframe,
+			horizon_bars,
+			created_at
+		FROM signal_runs
+		WHERE asset_id = $1
+		ORDER BY as_of_time DESC, id DESC
+		LIMIT $2
+	`, assetID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.SignalRun
+	for rows.Next() {
+		var (
+			item             domain.SignalRun
+			rawProbabilities []byte
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.AssetID,
+			&item.ModelVersion,
+			&item.AsOfTime,
+			&item.SignalState,
+			&item.SignalDirection,
+			&item.SignalProbability,
+			&rawProbabilities,
+			&item.Threshold,
+			&item.Timeframe,
+			&item.HorizonBars,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(rawProbabilities, &item.ClassProbabilities); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}

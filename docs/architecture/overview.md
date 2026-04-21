@@ -2,7 +2,7 @@
 
 ## Цель
 
-Подготовить стартовую архитектуру для Sprint 1 и зафиксировать границы модулей.
+Зафиксировать рабочую архитектуру после Sprint 2 и границы модулей.
 
 ## Контуры системы
 
@@ -23,7 +23,8 @@
 2. `ml-core` строит features и datasets по согласованным contracts.
 3. `ml-core` обучает модели и публикует model artifacts.
 4. `backend` использует model manifest и later ONNX artifact для online inference.
-5. `frontend` запрашивает API backend и отображает signal state.
+5. `backend` публикует signal history и latest ML artifacts для operator GUI.
+6. `frontend` запрашивает API backend и отображает signal state, history и artifact drill-down.
 
 ## Принятая product semantics сигнала
 
@@ -32,10 +33,10 @@
 - уведомления срабатывают только на actionable signals;
 - frontend показывает и итоговый статус, и вероятностный breakdown на detail page.
 
-## Что считается готовым по итогам Sprint 1
+## Что считается готовым по итогам Sprint 2
 
-- каркас репозитория;
-- стартовый backend skeleton;
-- contracts по API и данным;
-- новая постановка ML задачи;
-- foundation для Sprint 2.
+- интерактивный operator GUI поверх реального backend API;
+- signal history по активу и latest signal tape;
+- ML artifact overview и document browser;
+- Sprint 2 research stack: ablation, walk-forward, production gate, calibration audit;
+- рабочий вертикальный срез `ml-core -> backend -> frontend`.

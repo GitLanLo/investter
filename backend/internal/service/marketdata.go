@@ -40,8 +40,8 @@ func (s *MarketDataService) ListCandles(
 	if limit <= 0 {
 		limit = 500
 	}
-	if limit > 5000 {
-		limit = 5000
+	if limit > 20000 {
+		limit = 20000
 	}
 
 	items, err := s.repo.ListCandles(ctx, asset.Ticker, asset.Timeframe, from, to, limit)

@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("db migrate failed: %v", err)
 	}
 
-	container := app.NewContainer(db, cfg.MLDataRoot)
+	container := app.NewContainer(db, cfg.MLDataRoot, cfg.MLResearchRoot)
 	if err := container.Services.Assets.SeedDefaults(context.Background()); err != nil {
 		log.Fatalf("asset seed failed: %v", err)
 	}

@@ -34,4 +34,5 @@ type ModelRegistryRepository interface {
 type SignalRunRepository interface {
 	Create(ctx context.Context, run domain.SignalRun) (domain.SignalRun, error)
 	ListLatest(ctx context.Context, limit int) ([]domain.SignalRun, error)
+	ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error)
 }

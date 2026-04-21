@@ -104,6 +104,20 @@ func (s *AnalysisService) ListLatest(ctx context.Context, limit int) ([]domain.S
 	return s.signalRepo.ListLatest(ctx, limit)
 }
 
+func (s *AnalysisService) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+	if assetID == "" {
+		return nil, errors.New("assetID must not be empty")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	return s.signalRepo.ListByAsset(ctx, assetID, limit)
+}
+
 func (s *AnalysisService) resolveModel(ctx context.Context, version string) (domain.ModelRegistryEntry, error) {
 	var (
 		entry domain.ModelRegistryEntry

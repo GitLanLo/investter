@@ -1,8 +1,8 @@
 # API Contract v1
 
-## Scope Sprint 1
+## Scope Sprint 2
 
-В Sprint 1 этот документ фиксирует contract v1 для предметных endpoint-ов и уже принятые решения по семантике сигнала.
+В Sprint 2 этот документ фиксирует рабочий contract v1 для backend API и уже принятые решения по семантике сигнала и ML artifact access.
 
 ## Общие правила
 
@@ -130,6 +130,37 @@
 }
 ```
 
+### `GET /assets/{id}/signals`
+
+- назначение: история signal runs по выбранному инструменту
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "asset_id": "SBER",
+      "as_of_time": "2026-04-11T14:04:00Z",
+      "signal_state": "actionable",
+      "signal_direction": "up",
+      "signal_probability": 0.7375,
+      "class_probabilities": {
+        "up": 0.7375,
+        "down": 0.1302,
+        "no_trade": 0.1323
+      },
+      "model_version": "baseline_stub_v1",
+      "threshold": 0.65,
+      "timeframe": "5m",
+      "horizon_bars": 12
+    }
+  ]
+}
+```
+
 ### `POST /analysis/run`
 
 - назначение: запуск расчёта вероятности сигнала
@@ -195,6 +226,38 @@
 }
 ```
 
+### `GET /ml/research/overview`
+
+- назначение: latest dataset/research/calibration summary для operator GUI
+- status: implemented
+- response fields:
+  - `dataset_manifest`
+  - `research_summary`
+  - `calibration_summary`
+  - `source_paths`
+  - `warnings`
+
+### `GET /ml/research/documents`
+
+- назначение: latest безопасный набор artifact documents для GUI drill-down
+- status: implemented
+- response example:
+
+```json
+{
+  "generated_at": "2026-04-15T00:00:00Z",
+  "items": [
+    {
+      "key": "research_report",
+      "title": "Research report",
+      "path": "../artifacts/research/mvp_live_wf_20260409/ablation_sprint2_richer_modelpack/report.md",
+      "content_type": "markdown",
+      "content": "# Research report\n\n..."
+    }
+  ]
+}
+```
+
 ### `GET /watchlist`
 
 - назначение: список наблюдаемых инструментов
@@ -247,4 +310,5 @@
 - `signal_probability = max(p_up, p_down)`
 - actionable signal возникает только если directional class победил и directional probability выше порога
 - для UI и notifications backend возвращает и итоговое состояние сигнала, и полный probability breakdown
-- в Sprint 1 backend использует bootstrap manifest `artifacts/models/baseline_stub_v1/model_manifest.json` и deterministic stub runtime как временный inference adapter
+- backend пока использует bootstrap manifest `artifacts/models/baseline_stub_v1/model_manifest.json` и deterministic stub runtime как временный inference adapter;
+- Sprint 2 UI уже работает поверх signal history и ML artifact documents, даже если production inference path ещё stub-based.
