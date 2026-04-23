@@ -35,4 +35,11 @@ type SignalRunRepository interface {
 	Create(ctx context.Context, run domain.SignalRun) (domain.SignalRun, error)
 	ListLatest(ctx context.Context, limit int) ([]domain.SignalRun, error)
 	ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error)
+	ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalRun, error)
+}
+
+type PolicyValidationRunRepository interface {
+	Create(ctx context.Context, run domain.PolicyValidationRun) (domain.PolicyValidationRun, error)
+	ListLatest(ctx context.Context, limit int) ([]domain.PolicyValidationRun, error)
+	UpdateDecisionState(ctx context.Context, id int64, decisionState string, notes string) (domain.PolicyValidationRun, error)
 }

@@ -20,6 +20,16 @@ export type SignalDTO = {
   timeframe: string;
   horizon_bars: number;
   created_at?: string;
+  policy?: SignalPolicyDTO;
+};
+
+export type SignalPolicyDTO = {
+  policy_status: string;
+  model_name: string;
+  scenario_name: string;
+  calibration_method: string;
+  threshold: number;
+  dataset_version: string;
 };
 
 export type CandleDTO = {
@@ -86,6 +96,38 @@ export type ProductionPolicyMetricsDTO = {
   actionable_ece: number;
 };
 
+export type PolicyValidationRunDTO = {
+  id: number;
+  policy_status: string;
+  model_name: string;
+  scenario_name: string;
+  calibration_method: string;
+  threshold: number;
+  dataset_version: string;
+  validation: ProductionPolicyMetricsDTO;
+  test: ProductionPolicyMetricsDTO;
+  decision_state: string;
+  notes: string;
+  created_at: string;
+};
+
+export type PolicyShadowSummaryDTO = {
+  validation_run_id: number;
+  decision_state: string;
+  model_name: string;
+  calibration_method: string;
+  threshold: number;
+  dataset_version: string;
+  signals_total: number;
+  actionable_signals: number;
+  no_trade_signals: number;
+  up_signals: number;
+  down_signals: number;
+  observed_coverage: number;
+  first_signal_at?: string;
+  last_signal_at?: string;
+};
+
 export type AssetCard = {
   id: string;
   ticker: string;
@@ -107,6 +149,16 @@ export type SignalCard = {
   modelVersion: string;
   horizonBars: number;
   classProbabilities: Record<string, number>;
+  policy?: SignalPolicySnapshot;
+};
+
+export type SignalPolicySnapshot = {
+  policyStatus: string;
+  modelName: string;
+  scenarioName: string;
+  calibrationMethod: string;
+  threshold: number;
+  datasetVersion: string;
 };
 
 export type CandleBar = {
@@ -210,6 +262,38 @@ export type ProductionPolicySnapshot = {
   warnings: string[];
 };
 
+export type PolicyValidationRun = {
+  id: number;
+  policyStatus: string;
+  modelName: string;
+  scenarioName: string;
+  calibrationMethod: string;
+  threshold: number;
+  datasetVersion: string;
+  validation: CandidateMetrics;
+  test: CandidateMetrics;
+  decisionState: string;
+  notes: string;
+  createdAt: string;
+};
+
+export type PolicyShadowSummary = {
+  validationRunId: number;
+  decisionState: string;
+  modelName: string;
+  calibrationMethod: string;
+  threshold: number;
+  datasetVersion: string;
+  signalsTotal: number;
+  actionableSignals: number;
+  noTradeSignals: number;
+  upSignals: number;
+  downSignals: number;
+  observedCoverage: number;
+  firstSignalAt?: string;
+  lastSignalAt?: string;
+};
+
 export type ArtifactDocument = {
   key: string;
   title: string;
@@ -223,6 +307,8 @@ export type WorkspaceShellData = {
   latestSignals: SignalCard[];
   mlOverview: MLOverview;
   productionPolicy: ProductionPolicySnapshot;
+  policyValidationRuns: PolicyValidationRun[];
+  policyShadowSummary?: PolicyShadowSummary;
   artifactDocuments: ArtifactDocument[];
   generatedFrom: "api" | "mock";
 };

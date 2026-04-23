@@ -48,6 +48,8 @@ invest-ml run-calibration-audit --model-dir ../artifacts/research/ablation_v1/no
 invest-ml run-research-pipeline --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/mvp_run --dataset-version mvp_v1 --ticker SBER --factor usdrub --factor brent --factor rtsi --timeframe 5m --run-ablation
 invest-ml tinkoff-sync-asset --data-root ../data --ticker SBER --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind share --class-code TQBR
 invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000UTSTOM --from 2026-04-01T07:00:00Z --to 2026-04-02T07:00:00Z --timeframe 5m --instrument-kind currency --class-code CETS
+invest-ml tinkoff-sync-universe --config ../configs/mvp_universe_v1.json --data-root ../data --from 2026-03-30T07:00:00Z --to 2026-04-09T07:00:00Z
+invest-ml run-baseline-research --dataset-root ../data/datasets/dataset_version=mvp_v1_20260409 --output-root ../artifacts/research/baseline_mvp_v1_20260409
 ```
 
 `run-ablation-research` запускает Sprint 2 ablation series:
@@ -77,3 +79,7 @@ invest-ml tinkoff-sync-factor --data-root ../data --alias usdrub --ticker USD000
 export TINKOFF_INVEST_TOKEN=...
 export TINKOFF_INVEST_TARGET=prod
 ```
+
+Tinkoff sync commands по умолчанию incremental/idempotent. Для полного backfill конкретного инструмента используйте `--no-incremental`; для контролируемого повторного захвата последних свечей используйте `--overlap-bars`.
+
+Sprint 1 baseline на реальных данных зафиксирован в `../docs/ml/baseline_report_sprint1.md`.

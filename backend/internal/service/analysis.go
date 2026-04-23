@@ -28,17 +28,24 @@ type AnalysisService struct {
 	assetRepo  repository.AssetRepository
 	modelRepo  repository.ModelRegistryRepository
 	signalRepo repository.SignalRunRepository
+	research   *ResearchArtifactsService
 }
 
 func NewAnalysisService(
 	assetRepo repository.AssetRepository,
 	modelRepo repository.ModelRegistryRepository,
 	signalRepo repository.SignalRunRepository,
+	research ...*ResearchArtifactsService,
 ) *AnalysisService {
+	var researchService *ResearchArtifactsService
+	if len(research) > 0 {
+		researchService = research[0]
+	}
 	return &AnalysisService{
 		assetRepo:  assetRepo,
 		modelRepo:  modelRepo,
 		signalRepo: signalRepo,
+		research:   researchService,
 	}
 }
 
@@ -89,6 +96,9 @@ func (s *AnalysisService) Run(ctx context.Context, input RunAnalysisInput) (doma
 		Timeframe:          manifest.Timeframe,
 		HorizonBars:        manifest.HorizonBars,
 	}
+	if policy := s.loadSignalPolicySnapshot(ctx); policy != nil {
+		run.Policy = policy
+	}
 
 	return s.signalRepo.Create(ctx, run)
 }
@@ -137,6 +147,24 @@ func (s *AnalysisService) resolveModel(ctx context.Context, version string) (dom
 	}
 
 	return entry, nil
+}
+
+func (s *AnalysisService) loadSignalPolicySnapshot(ctx context.Context) *domain.SignalPolicySnapshot {
+	if s.research == nil {
+		return nil
+	}
+	policy, err := s.research.LoadProductionPolicy(ctx)
+	if err != nil || policy.PolicyStatus == "" {
+		return nil
+	}
+	return &domain.SignalPolicySnapshot{
+		PolicyStatus:      policy.PolicyStatus,
+		ModelName:         policy.ModelName,
+		ScenarioName:      policy.ScenarioName,
+		CalibrationMethod: policy.CalibrationMethod,
+		Threshold:         policy.Threshold,
+		DatasetVersion:    policy.DatasetVersion,
+	}
 }
 
 func deterministicProbabilities(assetID string, asOfTime time.Time, modelVersion string) domain.SignalClassProbabilities {

@@ -1,12 +1,12 @@
 # invest
 
-Рабочий Sprint 2 baseline для `invest`: backend, ML/data core, operator GUI и локальная инфраструктура.
+Рабочий Sprint 3 baseline для `invest`: backend, ML/data core, operator GUI и локальная инфраструктура.
 
 ## Что уже сделано
 
-- подготовлены документы по ТЗ, roadmap, backlog и Sprint 1/Sprint 2;
+- подготовлены документы по ТЗ, roadmap, backlog и Sprint 1/Sprint 2/Sprint 3;
 - создана базовая структура монорепозитория;
-- добавлен `Go` backend с рабочими endpoint-ами `health`, `ready`, `assets`, `assets/{id}/candles`, `assets/{id}/factors`, `assets/{id}/signals`, `watchlist`, `analysis/run`, `signals/latest`, `ml/research/overview`, `ml/research/documents`;
+- добавлен `Go` backend с рабочими endpoint-ами `health`, `ready`, `assets`, `assets/{id}/candles`, `assets/{id}/factors`, `assets/{id}/signals`, `watchlist`, `analysis/run`, `signals/latest`, `ml/research/overview`, `ml/research/documents`, `ml/policy/production`, `ml/policy/validation-runs`;
 - добавлен локальный `docker compose` для `PostgreSQL`;
 - добавлены contracts/docs для архитектуры, API и ML;
 - добавлен `ml-core` с feature build, labeling, dataset split, one-shot research pipeline, walk-forward research, ablation/calibration workflows и richer model pack;
@@ -14,6 +14,9 @@
 - добавлена интеграция загрузки исторических данных через Tinkoff Invest API REST proxy;
 - добавлен frontend operator GUI с интерактивным candle workbench, range selection, factor sync, signal overlay, artifact browser и signal history;
 - backend переведён на normal migration files с compose-compatible bootstrap.
+- Sprint 1 закрыт на реальных Tinkoff данных; baseline report: `docs/ml/baseline_report_sprint1.md`.
+- Sprint 3 закрыт; completion note: `docs/sprint3_completion.md`.
+- данные обновлены до `mvp_live_20260422`; активный Sprint 3 policy candidate: `logreg_multiclass` + `identity` calibration, threshold `0.30`, validation run `id=2` в состоянии `shadow_live`; refresh note: `docs/ml/data_refresh_20260422.md`.
 
 ## Структура
 
@@ -115,6 +118,16 @@ invest-ml run-research-pipeline \
 - artifact browser для latest dataset/research/calibration documents;
 - Sprint 2 research stack с walk-forward, production gate и calibration audit.
 
+## Sprint 3 highlights
+
+- Sprint 3 closure note: `docs/sprint3_completion.md`;
+- normalized production policy API and validation run ledger;
+- operator transitions for policy validation runs: `candidate`, `shadow_live`, `promoted`, `blocked`;
+- persisted policy snapshot in new `signal_runs` plus shadow summary endpoint;
+- active policy candidate `logreg_multiclass` with `identity` calibration and threshold `0.30`;
+- GUI Policy Gate, policy-vs-signal comparison and chart layout hardening;
+- data refresh and calibration report: `docs/ml/data_refresh_20260422.md`.
+
 ## Документы
 
 - `development_plan.md`
@@ -122,10 +135,15 @@ invest-ml run-research-pipeline \
 - `sprint1_issue_cards.md`
 - `github_issues_sprint1.md`
 - `docs/architecture/overview.md`
+- `docs/sprint1_completion.md`
 - `docs/sprint2_completion.md`
+- `docs/sprint3_completion.md`
+- `docs/sprint3_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`
+- `docs/ml/baseline_report_sprint1.md`
+- `docs/ml/data_refresh_20260422.md`
 - `docs/ml/ml_objective_v1.md`
 - `docs/ml/target_engineering_v1.md`
 - `docs/ml/feature_space_v1.md`

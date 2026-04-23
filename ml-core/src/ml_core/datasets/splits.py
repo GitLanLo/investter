@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import json
+import shutil
 
 import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
@@ -96,6 +97,11 @@ def write_dataset_splits(
     train, val, test, manifest = build_time_splits(df, config=config)
     dataset_root = output_root / f"dataset_version={config.dataset_version}"
     dataset_root.mkdir(parents=True, exist_ok=True)
+
+    for split_name in ("train", "val", "test"):
+        split_root = dataset_root / f"split={split_name}"
+        if split_root.exists():
+            shutil.rmtree(split_root)
 
     write_dataset_split_frame(train, dataset_root=dataset_root, split_name="train")
     write_dataset_split_frame(val, dataset_root=dataset_root, split_name="val")

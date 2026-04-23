@@ -95,12 +95,7 @@ func (s *ResearchArtifactsService) LoadOverview(ctx context.Context) (ResearchAr
 		ctx,
 		s.researchRoot,
 		"summary.json",
-		func(payload map[string]any) bool {
-			_, hasScenarios := payload["scenarios"]
-			_, hasProductionCandidate := payload["production_candidate"]
-			_, hasResearchCandidate := payload["research_candidate"]
-			return hasScenarios && hasProductionCandidate && hasResearchCandidate
-		},
+		isResearchSummaryPayload,
 	)
 	if err != nil {
 		return ResearchArtifactsOverview{}, err
@@ -133,6 +128,25 @@ func (s *ResearchArtifactsService) LoadOverview(ctx context.Context) (ResearchAr
 	}
 
 	return overview, nil
+}
+
+func isResearchSummaryPayload(payload map[string]any) bool {
+	_, hasProductionCandidate := payload["production_candidate"]
+	_, hasResearchCandidate := payload["research_candidate"]
+	if !hasProductionCandidate || !hasResearchCandidate {
+		return false
+	}
+
+	_, hasCalibrationMethods := payload["methods"]
+	_, hasModelDir := payload["model_dir"]
+	if hasCalibrationMethods || hasModelDir {
+		return false
+	}
+
+	_, hasScenarios := payload["scenarios"]
+	_, hasModels := payload["models"]
+	_, hasModelGroup := payload["model_group"]
+	return hasScenarios || hasModels || hasModelGroup
 }
 
 func (s *ResearchArtifactsService) LoadDocuments(ctx context.Context) ([]ResearchArtifactDocument, error) {
@@ -257,6 +271,13 @@ func (s *ResearchArtifactsService) LoadProductionPolicy(ctx context.Context) (Pr
 
 	policy.ModelName = stringField(researchCandidate, "model_name")
 	policy.ScenarioName = stringField(researchCandidate, "scenario_name")
+	if !calibrationMatchesResearch(overview.CalibrationSummary, policy.ModelName) {
+		if calibrationCandidate != nil {
+			policy.Warnings = append(policy.Warnings, "calibration production_candidate does not match research production model")
+		}
+		calibrationCandidate = nil
+	}
+
 	policy.CalibrationMethod = stringField(calibrationCandidate, "method")
 	policy.Threshold = floatField(calibrationCandidate, "selected_threshold")
 	if policy.Threshold == 0 {
@@ -279,6 +300,17 @@ func (s *ResearchArtifactsService) LoadProductionPolicy(ctx context.Context) (Pr
 	}
 
 	return policy, nil
+}
+
+func calibrationMatchesResearch(calibrationSummary map[string]any, researchModelName string) bool {
+	if calibrationSummary == nil || researchModelName == "" {
+		return false
+	}
+	calibrationModelName := stringField(calibrationSummary, "model_name")
+	if calibrationModelName == "" {
+		return true
+	}
+	return calibrationModelName == researchModelName
 }
 
 func findLatestJSON(

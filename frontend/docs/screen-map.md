@@ -8,7 +8,7 @@
 
 2. `Asset Details`
    Назначение: карточка одного инструмента, breakdown вероятностей, история последних прогонов модели.
-   Источники: текущий `signals/latest`, далее в Sprint 2 отдельный history endpoint.
+   Источники: текущий `signals/latest`, `GET /assets/{id}/signals`, policy snapshot внутри signal DTO.
 
 3. `Watchlist`
    Назначение: список активов, порядок и статусы слежения.
@@ -18,12 +18,17 @@
    Назначение: конфигурация trigger rules и cooldown.
    Источники: Sprint 2 API для notification rules.
 
+5. `Policy Gate`
+   Назначение: фиксация текущего production policy snapshot и операторский перевод candidate в shadow/live/promotion states.
+   Источники: `GET /ml/policy/validation-runs`, `POST /ml/policy/validation-runs`, `PATCH /ml/policy/validation-runs/{id}`, `GET /ml/policy/shadow-summary`.
+
 ## Навигационные переходы
 
 - `Dashboard -> Asset Details`
 - `Dashboard -> Watchlist`
 - `Watchlist -> Asset Details`
 - `Asset Details -> Notification Rules`
+- `Research Board -> Policy Gate`
 
 ## Sprint 1 scope
 

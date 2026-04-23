@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from ml_core.ingest.providers import LocalParquetProvider
-from ml_core.storage.layouts import ingest_asset_frame, ingest_factor_frame
+from ml_core.storage.layouts import ingest_asset_frame, ingest_factor_frame, write_dataset_split_frame
 
 
 def test_ingest_writes_contract_aligned_raw_layout_and_provider_reads_it(tmp_path: Path) -> None:
@@ -98,3 +98,38 @@ def test_partition_writer_rewrites_existing_partition_without_duplicates(tmp_pat
     loaded_asset = provider.fetch_asset_history("SBER", "5m")
     assert len(loaded_asset) == 3
     assert loaded_asset["timestamp"].is_unique
+
+
+def test_dataset_partition_writer_preserves_same_timestamp_for_different_tickers(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    first = pd.DataFrame(
+        {
+            "timestamp": ["2026-01-01T10:00:00Z", "2026-01-01T10:00:00Z"],
+            "ticker": ["SBER", "GAZP"],
+            "timeframe": ["5m", "5m"],
+            "close": [100.0, 200.0],
+        }
+    )
+    second = pd.DataFrame(
+        {
+            "timestamp": ["2026-01-01T10:00:00Z", "2026-01-01T10:05:00Z"],
+            "ticker": ["SBER", "SBER"],
+            "timeframe": ["5m", "5m"],
+            "close": [101.0, 102.0],
+        }
+    )
+
+    write_dataset_split_frame(first, dataset_root=dataset_root, split_name="train")
+    write_dataset_split_frame(second, dataset_root=dataset_root, split_name="train")
+
+    loaded = pd.concat(
+        [pd.read_parquet(path) for path in sorted((dataset_root / "split=train").rglob("*.parquet"))],
+        ignore_index=True,
+    )
+    assert len(loaded) == 3
+    assert set(loaded["ticker"]) == {"SBER", "GAZP"}
+    sber_close = loaded.loc[
+        (loaded["ticker"] == "SBER") & (loaded["timestamp"] == pd.Timestamp("2026-01-01T10:00:00Z")),
+        "close",
+    ].item()
+    assert sber_close == 101.0

@@ -1,14 +1,16 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from "react";
 import {
+  createPolicyValidationRun,
   formatMetric,
   formatProbability,
   loadAssetWorkbench,
   loadWorkspaceShell,
   runAnalysisForAsset,
+  updatePolicyValidationRun,
 } from "./lib/api";
 import type {
   ArtifactDocument,
@@ -18,13 +20,15 @@ import type {
   CandidateSnapshot,
   CandleBar,
   FactorPoint,
+  PolicyValidationRun,
+  PolicyShadowSummary,
   ProductionPolicySnapshot,
   ScenarioSnapshot,
   SignalCard,
   WorkspaceShellData,
 } from "./lib/types";
 
-const shellNav = ["Overview", "Signal Lab", "Research Board", "Artifact Feed"];
+const shellNav = ["Overview", "Signal Lab", "Research Board", "Policy Gate", "Artifact Feed"];
 const factorPalette = ["#d06931", "#1e7b89", "#5b7c2d", "#8d4fd1"];
 const emptyAssets: AssetCard[] = [];
 const emptySignals: SignalCard[] = [];
@@ -63,6 +67,8 @@ export function App() {
   const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null);
   const [loadingAsset, setLoadingAsset] = useState(false);
   const [runPending, setRunPending] = useState(false);
+  const [policyValidationPending, setPolicyValidationPending] = useState(false);
+  const [policyTransitionPendingId, setPolicyTransitionPendingId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const deferredAssetId = useDeferredValue(selectedAssetId);
@@ -140,6 +146,8 @@ export function App() {
     signals.find((signal) => signal.assetId === selectedAsset?.id) ?? signals[0] ?? null;
   const overview = shellData?.mlOverview;
   const productionPolicy = shellData?.productionPolicy;
+  const policyValidationRuns = shellData?.policyValidationRuns ?? [];
+  const policyShadowSummary = shellData?.policyShadowSummary;
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
   const baseCandles = workbenchData?.candles ?? emptyCandles;
   const baseFactors = workbenchData?.factors ?? emptyFactors;
@@ -207,6 +215,70 @@ export function App() {
       setActionError(error instanceof Error ? error.message : "analysis run failed");
     } finally {
       setRunPending(false);
+    }
+  }
+
+  async function handleCreatePolicyValidationRun() {
+    if (!productionPolicy || shellData?.generatedFrom === "mock") {
+      return;
+    }
+
+    setPolicyValidationPending(true);
+    setActionError(null);
+    try {
+      const nextRun = await createPolicyValidationRun(
+        `GUI validation snapshot for ${productionPolicy.modelName || "current policy"}`,
+      );
+      startTransition(() => {
+        setShellData((current) => {
+          if (!current) {
+            return current;
+          }
+          return {
+            ...current,
+            generatedFrom: "api",
+            policyValidationRuns: [nextRun, ...current.policyValidationRuns.filter((item) => item.id !== nextRun.id)].slice(0, 8),
+          };
+        });
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "policy validation run failed");
+    } finally {
+      setPolicyValidationPending(false);
+    }
+  }
+
+  async function handleUpdatePolicyValidationRun(run: PolicyValidationRun, decisionState: string) {
+    if (shellData?.generatedFrom === "mock") {
+      return;
+    }
+
+    setPolicyTransitionPendingId(run.id);
+    setActionError(null);
+    try {
+      const updatedRun = await updatePolicyValidationRun(
+        run.id,
+        decisionState,
+        `GUI decision: ${decisionState} on ${new Date().toISOString()}`,
+      );
+      startTransition(() => {
+        setShellData((current) => {
+          if (!current) {
+            return current;
+          }
+          return {
+            ...current,
+            generatedFrom: "api",
+            policyValidationRuns: current.policyValidationRuns.map((item) =>
+              item.id === updatedRun.id ? updatedRun : item,
+            ),
+          };
+        });
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "policy validation update failed");
+    } finally {
+      setPolicyTransitionPendingId(null);
     }
   }
 
@@ -372,6 +444,24 @@ export function App() {
             </p>
           </div>
 
+          <div className="policy-compare-strip">
+            <Metric
+              label="Signal"
+              value={formatProbability(selectedSignal?.threshold)}
+              tone={thresholdDeltaTone(selectedSignal, productionPolicy)}
+            />
+            <Metric
+              label="Policy"
+              value={formatProbability(selectedSignal?.policy?.threshold ?? productionPolicy?.threshold)}
+              tone={thresholdDeltaTone(selectedSignal, productionPolicy)}
+            />
+            <Metric
+              label="State"
+              value={formatPolicyStatus(selectedSignal?.policy?.policyStatus ?? productionPolicy?.status)}
+              tone={(selectedSignal?.policy?.policyStatus ?? productionPolicy?.status) === "production_candidate" ? "good" : "warn"}
+            />
+          </div>
+
           <div className="console-actions">
             <button
               className="action-button"
@@ -431,6 +521,51 @@ export function App() {
             <CandidateCard title="Research best" candidate={overview?.research?.researchCandidate} />
             <CandidateCard title="Production gate" candidate={overview?.research?.productionCandidate} />
             <CandidateCard title="Calibration gate" candidate={overview?.calibration?.productionCandidate} />
+          </div>
+        </section>
+
+        <section className="card policy-validation-panel" id="policy-gate">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Policy gate</p>
+              <h3>Validation run ledger</h3>
+            </div>
+            <span className="section-note">{policyValidationRuns.length} snapshots</span>
+          </div>
+          <div className="policy-validation-layout">
+            <div className="policy-validation-copy">
+              <p>
+                Persist the current production policy snapshot before shadow/live promotion. Each
+                row stores validation and test gates with operator notes.
+              </p>
+              <PolicyShadowSummaryCard summary={policyShadowSummary} />
+              <button
+                className="action-button"
+                type="button"
+                onClick={() => {
+                  void handleCreatePolicyValidationRun();
+                }}
+                disabled={!productionPolicy || policyValidationPending || shellData?.generatedFrom === "mock"}
+              >
+                {policyValidationPending ? "Saving snapshot..." : "Save policy snapshot"}
+              </button>
+            </div>
+            <div className="policy-run-list">
+              {policyValidationRuns.length ? (
+                policyValidationRuns.map((run) => (
+                  <PolicyValidationRunRow
+                    key={run.id}
+                    run={run}
+                    disabled={shellData?.generatedFrom === "mock" || policyTransitionPendingId === run.id}
+                    onDecision={(decisionState) => {
+                      void handleUpdatePolicyValidationRun(run, decisionState);
+                    }}
+                  />
+                ))
+              ) : (
+                <p className="empty-note">No policy validation runs yet.</p>
+              )}
+            </div>
           </div>
         </section>
 
@@ -856,6 +991,104 @@ function SignalHistoryRow({ signal, active }: { signal: SignalCard; active: bool
   );
 }
 
+function PolicyValidationRunRow({
+  run,
+  disabled,
+  onDecision,
+}: {
+  run: PolicyValidationRun;
+  disabled: boolean;
+  onDecision: (decisionState: string) => void;
+}) {
+  const nextDecisionActions = policyDecisionActions(run.decisionState);
+  return (
+    <article className="policy-run-row">
+      <div>
+        <p className="signal-row-title">
+          {run.modelName} · {run.calibrationMethod}
+        </p>
+        <p className="signal-row-meta">
+          {run.datasetVersion} · threshold {formatProbability(run.threshold)} · {formatDate(run.createdAt)}
+        </p>
+        {run.notes ? <p className="policy-run-note">{run.notes}</p> : null}
+        {nextDecisionActions.length ? (
+          <div className="policy-run-actions">
+            {nextDecisionActions.map((action) => (
+              <button
+                key={action.state}
+                className="policy-run-action"
+                type="button"
+                onClick={() => onDecision(action.state)}
+                disabled={disabled}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="policy-run-metrics">
+        <Metric label="Decision" value={run.decisionState} tone={run.decisionState === "blocked" ? "warn" : "good"} />
+        <Metric label="Val F1" value={formatMetric(run.validation.actionableF1, 3)} />
+        <Metric label="Val ECE" value={formatMetric(run.validation.actionableEce, 3)} />
+        <Metric label="Test precision" value={formatMetric(run.test.precision, 3)} />
+      </div>
+    </article>
+  );
+}
+
+function PolicyShadowSummaryCard({ summary }: { summary?: PolicyShadowSummary }) {
+  if (!summary) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Shadow monitor</p>
+        <p className="empty-note">No persisted policy signal history yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">Shadow monitor</p>
+        <p className="signal-row-meta">
+          run #{summary.validationRunId} · {summary.decisionState} · {summary.datasetVersion}
+        </p>
+      </div>
+      <div className="shadow-summary-grid">
+        <Metric label="Signals" value={String(summary.signalsTotal)} />
+        <Metric label="Actionable" value={String(summary.actionableSignals)} />
+        <Metric label="Coverage" value={formatProbability(summary.observedCoverage)} />
+        <Metric label="Up / Down" value={`${summary.upSignals}/${summary.downSignals}`} />
+      </div>
+      <p className="signal-row-meta">
+        {summary.firstSignalAt && summary.lastSignalAt
+          ? `${formatDate(summary.firstSignalAt)} - ${formatDate(summary.lastSignalAt)}`
+          : "Waiting for first persisted signal"}
+      </p>
+    </div>
+  );
+}
+
+function policyDecisionActions(decisionState: string) {
+  switch (decisionState) {
+    case "candidate":
+      return [
+        { state: "shadow_live", label: "Start shadow" },
+        { state: "blocked", label: "Block" },
+      ];
+    case "shadow_live":
+      return [
+        { state: "promoted", label: "Promote" },
+        { state: "blocked", label: "Block" },
+      ];
+    case "blocked":
+      return [{ state: "candidate", label: "Reopen" }];
+    default:
+      return [];
+  }
+}
+
 function CandleChart({
   candles,
   timeframe,
@@ -867,8 +1100,10 @@ function CandleChart({
   signal?: SignalCard;
   onFocusRangeChange?: (range: FocusedChartRange | null) => void;
 }) {
+  const chartScrollRef = useRef<HTMLDivElement | null>(null);
+  const initialWindowSize = initialViewportBars(candles.length, timeframe);
   const [hoverIndex, setHoverIndex] = useState<number | null>(candles.length ? candles.length - 1 : null);
-  const [windowSize, setWindowSize] = useState(Math.min(candles.length, maxViewportBars(candles.length)));
+  const [windowSize, setWindowSize] = useState(initialWindowSize);
   const [windowEndIndex, setWindowEndIndex] = useState(candles.length - 1);
   const [selectedRange, setSelectedRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const [brushState, setBrushState] = useState<{
@@ -879,21 +1114,23 @@ function CandleChart({
   } | null>(null);
 
   useEffect(() => {
-    setWindowSize(Math.min(candles.length, maxViewportBars(candles.length)));
+    setWindowSize(initialViewportBars(candles.length, timeframe));
     setWindowEndIndex(candles.length - 1);
     setHoverIndex(candles.length ? candles.length - 1 : null);
     setSelectedRange(null);
     setBrushState(null);
-  }, [candles]);
+  }, [candles, timeframe]);
 
   const width = 980;
   const height = 380;
+  const chartCanvasWidth = chartScrollCanvasWidth(candles.length, timeframe);
   const padX = 36;
   const padY = 24;
   const priceBottomY = 286;
   const volumeTopY = 308;
   const volumeBottomY = 360;
   const viewport = clampViewport(windowSize, windowEndIndex, candles.length);
+  const normalizedWindowSize = Math.max(viewport.endIndex - viewport.startIndex + 1, 0);
   const visibleCandles = candles.slice(viewport.startIndex, viewport.endIndex + 1);
   const lows = visibleCandles.map((item) => item.low);
   const highs = visibleCandles.map((item) => item.high);
@@ -912,7 +1149,9 @@ function CandleChart({
     y: padY + (priceBottomY - padY) * ratio,
     value: maxPrice - span * ratio,
   }));
-  const absoluteActiveIndex = hoverIndex ?? viewport.endIndex;
+  const absoluteActiveIndex = Math.round(
+    clampNumber(hoverIndex ?? viewport.endIndex, viewport.startIndex, viewport.endIndex),
+  );
   const activeIndex = Math.min(
     Math.max(absoluteActiveIndex - viewport.startIndex, 0),
     Math.max(visibleCandles.length - 1, 0),
@@ -951,6 +1190,16 @@ function CandleChart({
   const canZoomOut = visibleCandles.length < candles.length;
   const canPanLeft = viewport.startIndex > 0;
   const canPanRight = viewport.endIndex < candles.length - 1;
+
+  useEffect(() => {
+    const scrollNode = chartScrollRef.current;
+    if (!scrollNode) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      scrollNode.scrollLeft = scrollNode.scrollWidth - scrollNode.clientWidth;
+    });
+  }, [chartCanvasWidth, timeframe, candles.length]);
 
   useEffect(() => {
     if (!onFocusRangeChange) {
@@ -1007,23 +1256,27 @@ function CandleChart({
       return;
     }
     clearSelection();
+    const boundedAnchorIndex = Math.round(clampNumber(anchorAbsoluteIndex, 0, candles.length - 1));
     const boundedSize = Math.max(
       Math.min(nextSize, maxViewportBars(candles.length)),
       Math.min(24, candles.length),
     );
     const anchorOffset = Math.min(
-      Math.max(anchorAbsoluteIndex - viewport.startIndex, 0),
+      Math.max(boundedAnchorIndex - viewport.startIndex, 0),
       Math.max(visibleCandles.length - 1, 0),
     );
     const anchorRatio = visibleCandles.length > 1 ? anchorOffset / (visibleCandles.length - 1) : 1;
-    const nextStart = Math.round(anchorAbsoluteIndex - anchorRatio * Math.max(boundedSize - 1, 0));
+    const nextStart = Math.round(boundedAnchorIndex - anchorRatio * Math.max(boundedSize - 1, 0));
     const nextClampedStart = Math.min(Math.max(nextStart, 0), Math.max(candles.length - boundedSize, 0));
     setWindowSize(boundedSize);
     setWindowEndIndex(nextClampedStart + boundedSize - 1);
-    setHoverIndex(anchorAbsoluteIndex);
+    setHoverIndex(boundedAnchorIndex);
   }
 
   function handleWheel(event: ReactWheelEvent<SVGSVGElement>) {
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      return;
+    }
     event.preventDefault();
     const direction = event.deltaY < 0 ? "in" : "out";
     const nextSize = direction === "in"
@@ -1035,8 +1288,9 @@ function CandleChart({
   function shiftWindow(direction: "left" | "right") {
     clearSelection();
     const step = Math.max(Math.floor(visibleCandles.length * 0.25), 24);
-    const nextEnd = direction === "left" ? windowEndIndex - step : windowEndIndex + step;
-    const nextViewport = clampViewport(windowSize, nextEnd, candles.length);
+    const nextEnd = direction === "left" ? viewport.endIndex - step : viewport.endIndex + step;
+    const nextViewport = clampViewport(normalizedWindowSize, nextEnd, candles.length);
+    setWindowSize(normalizedWindowSize);
     setWindowEndIndex(nextViewport.endIndex);
     setHoverIndex(nextViewport.endIndex);
   }
@@ -1076,7 +1330,7 @@ function CandleChart({
     <div className="chart-shell">
       <div className="chart-inspector">
         <div className="chart-inspector-copy">
-          <strong className="chart-inspector-title">
+          <strong className={`chart-inspector-title ${effectiveRange ? "chart-inspector-title-range" : ""}`}>
             {effectiveRange ? formatSelectionLabel(inspectedCandles) : formatDate(activeCandle?.timestamp)}
           </strong>
           <div className="chart-inspector-meta">
@@ -1089,11 +1343,11 @@ function CandleChart({
           </div>
         </div>
         <div className="inspector-stats">
-          <InspectorStat label="O" value={formatPrice(inspectedSummary?.open)} />
-          <InspectorStat label="H" value={formatPrice(inspectedSummary?.high)} />
-          <InspectorStat label="L" value={formatPrice(inspectedSummary?.low)} />
-          <InspectorStat label="C" value={formatPrice(inspectedSummary?.close)} />
-          <InspectorStat label="V" value={formatCompactInteger(inspectedSummary?.volume)} />
+          <InspectorStat label="Open" value={formatPrice(inspectedSummary?.open)} />
+          <InspectorStat label="High" value={formatPrice(inspectedSummary?.high)} />
+          <InspectorStat label="Low" value={formatPrice(inspectedSummary?.low)} />
+          <InspectorStat label="Close" value={formatPrice(inspectedSummary?.close)} />
+          <InspectorStat label="Volume" value={formatCompactInteger(inspectedSummary?.volume)} />
         </div>
       </div>
       <div className="chart-zoom-bar">
@@ -1113,8 +1367,8 @@ function CandleChart({
           <button
             className="zoom-button"
             type="button"
-            onClick={() => applyZoom(maxViewportBars(candles.length), candles.length - 1)}
-            disabled={!canZoomOut}
+            onClick={() => applyZoom(initialViewportBars(candles.length, timeframe), candles.length - 1)}
+            disabled={visibleCandles.length === initialViewportBars(candles.length, timeframe) && viewport.endIndex === candles.length - 1}
           >
             reset
           </button>
@@ -1125,161 +1379,176 @@ function CandleChart({
           ) : null}
         </div>
         <p className="zoom-note">
-          scale {visibleCandles.length} / {candles.length} bars, wheel to zoom, drag to select
+          scale {visibleCandles.length} / {candles.length} bars, vertical wheel to zoom, horizontal scroll to move
         </p>
       </div>
-      <svg
-        className={`chart-svg ${brushState ? "chart-svg-selecting" : ""}`}
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="candlestick chart"
-        onPointerMove={(event) => {
-          if (brushState && brushState.pointerId === event.pointerId) {
-            const nextIndex = absoluteIndexFromEvent(event);
-            setHoverIndex(nextIndex);
-            setBrushState((current) =>
-              current
-                ? {
-                    ...current,
-                    currentIndex: nextIndex,
-                  }
-                : current,
-            );
-            return;
-          }
-          handlePointerMove(event);
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerLeave={() => {
-          if (!brushState) {
-            setHoverIndex(viewport.endIndex);
-          }
-        }}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
-          setBrushState(null);
-        }}
-        onWheel={handleWheel}
-      >
-        {priceTicks.map((tick) => (
-          <g key={tick.ratio}>
-            <line x1={padX} x2={width - padX - 48} y1={tick.y} y2={tick.y} className="chart-grid-line" />
-            <text x={width - padX - 36} y={tick.y + 4} className="chart-price-label">
-              {formatPrice(tick.value)}
-            </text>
-          </g>
-        ))}
-        <line x1={padX} x2={width - padX - 48} y1={volumeTopY} y2={volumeTopY} className="chart-volume-divider" />
-        {gapBands.map((band) => (
-          <rect
-            key={`${band.startX}-${band.endX}`}
-            x={band.startX}
-            y={padY}
-            width={Math.max(band.endX - band.startX, 1)}
-            height={priceBottomY - padY}
-            className="chart-gap-band"
-          />
-        ))}
-        {selectionBand ? (
-          <rect
-            x={selectionBand.startX}
-            y={padY}
-            width={Math.max(selectionBand.endX - selectionBand.startX, 1)}
-            height={volumeBottomY - padY}
-            className="chart-selection-band"
-          />
-        ) : null}
-        {visibleCandles.map((candle, index) => {
-          const x = xPositions[index];
-          const tone = candle.close >= candle.open ? "up" : "down";
-          const volumeHeight = Math.max(2, (candle.volume / maxVolume) * (volumeBottomY - volumeTopY));
-          return (
-            <rect
-              key={`${candle.timestamp}-volume`}
-              x={x - candleWidth / 2}
-              y={volumeBottomY - volumeHeight}
-              width={candleWidth}
-              height={volumeHeight}
-              rx={Math.min(candleWidth / 2, 2)}
-              className={`chart-volume-bar chart-volume-bar-${tone}`}
-            />
-          );
-        })}
-        {signalMarker ? (
-          <g className={`chart-signal-marker chart-signal-marker-${signalMarker.tone}`}>
-            <rect
-              x={signalMarker.rectX}
-              y={signalMarker.rectY}
-              width={signalMarker.width}
-              height={signalMarker.height}
-              rx={signalMarker.height / 2}
-              className="chart-signal-pill"
-            />
-            <text
-              x={signalMarker.rectX + signalMarker.width / 2}
-              y={signalMarker.rectY + signalMarker.height / 2 + 1}
-              className="chart-signal-text"
+      <div className="chart-scroll-frame">
+        <div className="chart-scroll-viewport" ref={chartScrollRef} tabIndex={0} aria-label="Scrollable candlestick chart">
+          <div className="chart-scroll-canvas" style={{ width: chartCanvasWidth }}>
+            <svg
+              className={`chart-svg ${brushState ? "chart-svg-selecting" : ""}`}
+              viewBox={`0 0 ${width} ${height}`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="candlestick chart"
+              onPointerMove={(event) => {
+                if (brushState && brushState.pointerId === event.pointerId) {
+                  const nextIndex = absoluteIndexFromEvent(event);
+                  setHoverIndex(nextIndex);
+                  setBrushState((current) =>
+                    current
+                      ? {
+                          ...current,
+                          currentIndex: nextIndex,
+                        }
+                      : current,
+                  );
+                  return;
+                }
+                handlePointerMove(event);
+              }}
+              onPointerDown={handlePointerDown}
+              onPointerLeave={() => {
+                if (!brushState) {
+                  setHoverIndex(viewport.endIndex);
+                }
+              }}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+                setBrushState(null);
+              }}
+              onWheel={handleWheel}
             >
-              {signalMarker.label}
-            </text>
-            <line
-              x1={signalMarker.anchorX}
-              x2={signalMarker.anchorX}
-              y1={signalMarker.rectY + signalMarker.height}
-              y2={signalMarker.anchorY}
-              className="chart-signal-stem"
-            />
-          </g>
-        ) : null}
-        <polyline points={closeLine} className="chart-close-line" />
-        {visibleCandles.map((candle, index) => {
-          const x = xPositions[index];
-          const wickTop = scaleYInRange(candle.high, minPrice, span, padY, priceBottomY);
-          const wickBottom = scaleYInRange(candle.low, minPrice, span, padY, priceBottomY);
-          const openY = scaleYInRange(candle.open, minPrice, span, padY, priceBottomY);
-          const closeY = scaleYInRange(candle.close, minPrice, span, padY, priceBottomY);
-          const bodyTop = Math.min(openY, closeY);
-          const bodyHeight = Math.max(Math.abs(openY - closeY), 2);
-          const tone = candle.close >= candle.open ? "up" : "down";
-
-          return (
-            <g key={candle.timestamp}>
-              <line x1={x} x2={x} y1={wickTop} y2={wickBottom} className={`wick wick-${tone}`} />
+              {priceTicks.map((tick) => (
+                <g key={tick.ratio}>
+                  <line x1={padX} x2={width - padX - 48} y1={tick.y} y2={tick.y} className="chart-grid-line" />
+                </g>
+              ))}
+            <line x1={padX} x2={width - padX - 48} y1={volumeTopY} y2={volumeTopY} className="chart-volume-divider" />
+            {gapBands.map((band) => (
               <rect
-                x={x - candleWidth / 2}
-                y={bodyTop}
-                width={candleWidth}
-                height={bodyHeight}
-                rx={3}
-                className={`candle candle-${tone}`}
+                key={`${band.startX}-${band.endX}`}
+                x={band.startX}
+                y={padY}
+                width={Math.max(band.endX - band.startX, 1)}
+                height={priceBottomY - padY}
+                className="chart-gap-band"
               />
-            </g>
-          );
-        })}
-        {selectionBand ? (
-          <>
-            <line
-              x1={selectionBand.startX}
-              x2={selectionBand.startX}
-              y1={padY}
-              y2={volumeBottomY}
-              className="chart-selection-edge"
-            />
-            <line
-              x1={selectionBand.endX}
-              x2={selectionBand.endX}
-              y1={padY}
-              y2={volumeBottomY}
-              className="chart-selection-edge"
-            />
-          </>
-        ) : (
-          <line x1={activeX} x2={activeX} y1={padY} y2={volumeBottomY} className="chart-crosshair" />
-        )}
-      </svg>
+            ))}
+            {selectionBand ? (
+              <rect
+                x={selectionBand.startX}
+                y={padY}
+                width={Math.max(selectionBand.endX - selectionBand.startX, 1)}
+                height={volumeBottomY - padY}
+                className="chart-selection-band"
+              />
+            ) : null}
+            {visibleCandles.map((candle, index) => {
+              const x = xPositions[index];
+              const tone = candle.close >= candle.open ? "up" : "down";
+              const volumeHeight = Math.max(2, (candle.volume / maxVolume) * (volumeBottomY - volumeTopY));
+              return (
+                <rect
+                  key={`${candle.timestamp}-volume`}
+                  x={x - candleWidth / 2}
+                  y={volumeBottomY - volumeHeight}
+                  width={candleWidth}
+                  height={volumeHeight}
+                  rx={Math.min(candleWidth / 2, 2)}
+                  className={`chart-volume-bar chart-volume-bar-${tone}`}
+                />
+              );
+            })}
+            {signalMarker ? (
+              <g className={`chart-signal-marker chart-signal-marker-${signalMarker.tone}`}>
+                <rect
+                  x={signalMarker.rectX}
+                  y={signalMarker.rectY}
+                  width={signalMarker.width}
+                  height={signalMarker.height}
+                  rx={signalMarker.height / 2}
+                  className="chart-signal-pill"
+                />
+                <text
+                  x={signalMarker.rectX + signalMarker.width / 2}
+                  y={signalMarker.rectY + signalMarker.height / 2 + 1}
+                  className="chart-signal-text"
+                >
+                  {signalMarker.label}
+                </text>
+                <line
+                  x1={signalMarker.anchorX}
+                  x2={signalMarker.anchorX}
+                  y1={signalMarker.rectY + signalMarker.height}
+                  y2={signalMarker.anchorY}
+                  className="chart-signal-stem"
+                />
+              </g>
+            ) : null}
+            <polyline points={closeLine} className="chart-close-line" />
+            {visibleCandles.map((candle, index) => {
+              const x = xPositions[index];
+              const wickTop = scaleYInRange(candle.high, minPrice, span, padY, priceBottomY);
+              const wickBottom = scaleYInRange(candle.low, minPrice, span, padY, priceBottomY);
+              const openY = scaleYInRange(candle.open, minPrice, span, padY, priceBottomY);
+              const closeY = scaleYInRange(candle.close, minPrice, span, padY, priceBottomY);
+              const bodyTop = Math.min(openY, closeY);
+              const bodyHeight = Math.max(Math.abs(openY - closeY), 2);
+              const tone = candle.close >= candle.open ? "up" : "down";
+
+              return (
+                <g key={candle.timestamp}>
+                  <line x1={x} x2={x} y1={wickTop} y2={wickBottom} className={`wick wick-${tone}`} />
+                  <rect
+                    x={x - candleWidth / 2}
+                    y={bodyTop}
+                    width={candleWidth}
+                    height={bodyHeight}
+                    rx={3}
+                    className={`candle candle-${tone}`}
+                  />
+                </g>
+              );
+            })}
+            {selectionBand ? (
+              <>
+                <line
+                  x1={selectionBand.startX}
+                  x2={selectionBand.startX}
+                  y1={padY}
+                  y2={volumeBottomY}
+                  className="chart-selection-edge"
+                />
+                <line
+                  x1={selectionBand.endX}
+                  x2={selectionBand.endX}
+                  y1={padY}
+                  y2={volumeBottomY}
+                  className="chart-selection-edge"
+                />
+              </>
+            ) : (
+              <line x1={activeX} x2={activeX} y1={padY} y2={volumeBottomY} className="chart-crosshair" />
+            )}
+            </svg>
+          </div>
+        </div>
+        <div className="chart-y-axis-overlay" aria-hidden="true">
+          {priceTicks.map((tick) => (
+            <span
+              key={tick.ratio}
+              className="chart-y-axis-tick"
+              style={{ top: `${(tick.y / height) * 100}%` }}
+            >
+              {formatPrice(tick.value)}
+            </span>
+          ))}
+        </div>
+      </div>
       <div className="chart-axis">
         <span>{formatAxisDate(visibleCandles[0]?.timestamp)}</span>
         <span>{formatAxisDate(visibleCandles[Math.floor(visibleCandles.length / 2)]?.timestamp)}</span>
@@ -1744,6 +2013,27 @@ function maxViewportBars(length: number) {
   return Math.min(length, 1440);
 }
 
+function initialViewportBars(length: number, timeframe: ChartTimeframe) {
+  if (!length) {
+    return 0;
+  }
+
+  const targetByTimeframe: Record<ChartTimeframe, number> = {
+    "5m": 180,
+    "15m": 180,
+    "1h": 160,
+    "4h": 140,
+    "1d": 120,
+  };
+
+  return Math.min(length, targetByTimeframe[timeframe], maxViewportBars(length));
+}
+
+function chartScrollCanvasWidth(length: number, timeframe: ChartTimeframe) {
+  const bars = initialViewportBars(length, timeframe);
+  return Math.max(1320, Math.ceil(bars * 8 + 120));
+}
+
 function minimumAdjacentGap(positions: number[]) {
   if (positions.length < 2) {
     return 10;
@@ -1794,6 +2084,27 @@ function badgeTone(direction: string | undefined) {
 
 function formatClassLabel(value: string) {
   return value.split("_").join(" ");
+}
+
+function thresholdDeltaTone(signal: SignalCard | null | undefined, policy: ProductionPolicySnapshot | undefined) {
+  const policyThreshold = signal?.policy?.threshold ?? policy?.threshold;
+  if (signal?.threshold === undefined || policyThreshold === undefined) {
+    return "neutral";
+  }
+  return Math.abs(signal.threshold - policyThreshold) <= 0.001 ? "good" : "warn";
+}
+
+function formatPolicyStatus(status: string | undefined) {
+  if (!status) {
+    return "n/a";
+  }
+  const labels: Record<string, string> = {
+    production_candidate: "candidate",
+    calibration_review: "calibration",
+    research_review: "research",
+    incomplete: "incomplete",
+  };
+  return labels[status] ?? status.replace(/_/g, " ");
 }
 
 function formatDate(value: string | undefined) {

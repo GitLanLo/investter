@@ -14,6 +14,7 @@ Frontend workspace для Sprint 2 operator GUI.
   - detached chart window;
 - synced factor strip и signal overlay;
 - artifact browser для latest dataset/research/calibration documents;
+- policy validation ledger для сохранения production policy snapshots перед promotion;
 - asset signal history panel;
 - prep pack в `docs/`:
   - `screen-map.md`

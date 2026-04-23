@@ -477,6 +477,181 @@ func TestProductionPolicyEndpoint(t *testing.T) {
 	}
 }
 
+func TestPolicyValidationRunsEndpoint(t *testing.T) {
+	dataRoot := t.TempDir()
+	researchRoot := t.TempDir()
+
+	writeJSONFile(t, filepath.Join(
+		dataRoot,
+		"datasets",
+		"dataset_version=test_live",
+		"manifest.json",
+	), map[string]any{
+		"dataset_version":        "test_live",
+		"feature_schema_version": "feature_v1",
+		"timeframe":              "5m",
+		"horizon_bars":           12,
+		"train_range":            map[string]any{"rows": 100},
+		"val_range":              map[string]any{"rows": 20},
+		"test_range":             map[string]any{"rows": 30},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"ablation_run",
+		"summary.json",
+	), map[string]any{
+		"production_candidate": map[string]any{
+			"scenario_name":      "core_price_volume_only",
+			"model_name":         "rf_multiclass",
+			"selected_threshold": 0.55,
+			"validation_gate":    map[string]any{"passed": true},
+		},
+		"research_candidate": map[string]any{"scenario_name": "no_regime"},
+		"scenarios":          map[string]any{"core_price_volume_only": map[string]any{}},
+	})
+	writeJSONFile(t, filepath.Join(
+		researchRoot,
+		"calibration_run",
+		"summary.json",
+	), map[string]any{
+		"model_dir": "artifacts/research/test_live/core_price_volume_only/rf_multiclass",
+		"production_candidate": map[string]any{
+			"method":             "platt",
+			"selected_threshold": 0.30,
+			"validation_gate":    map[string]any{"passed": true},
+			"validation": map[string]any{
+				"actionable_f1":                         0.36,
+				"precision_actionable_signal":           0.37,
+				"signal_coverage":                       0.54,
+				"actionable_expected_calibration_error": 0.01,
+			},
+			"test": map[string]any{
+				"actionable_f1":                         0.27,
+				"precision_actionable_signal":           0.25,
+				"signal_coverage":                       0.48,
+				"actionable_expected_calibration_error": 0.12,
+			},
+		},
+		"research_candidate": map[string]any{"method": "identity"},
+		"methods":            map[string]any{"platt": map[string]any{"available": true}},
+	})
+
+	policyRepo := &testPolicyValidationRepo{}
+	signalRepo := &testSignalRepo{}
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Policy: service.NewPolicyValidationService(
+					policyRepo,
+					service.NewResearchArtifactsService(dataRoot, researchRoot),
+					signalRepo,
+				),
+			},
+		},
+	})
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/ml/policy/validation-runs",
+		strings.NewReader(`{"notes":"shadow candidate"}`),
+	)
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("unexpected status for POST /ml/policy/validation-runs: %d body=%s", createResp.Code, createResp.Body.String())
+	}
+
+	var created mlPolicyValidationRunDTO
+	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created policy validation run: %v", err)
+	}
+	if created.ModelName != "rf_multiclass" || created.DecisionState != domain.PolicyDecisionCandidate {
+		t.Fatalf("unexpected created validation run: %+v", created)
+	}
+	if created.Notes != "shadow candidate" || created.Validation.ActionableECE != 0.01 {
+		t.Fatalf("unexpected validation run details: %+v", created)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/ml/policy/validation-runs?limit=5", nil)
+	listResp := httptest.NewRecorder()
+	router.ServeHTTP(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/policy/validation-runs: %d body=%s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed mlPolicyValidationRunsResponse
+	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode policy validation runs: %v", err)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].ID != created.ID {
+		t.Fatalf("unexpected validation run list: %+v", listed)
+	}
+
+	updateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/ml/policy/validation-runs/1",
+		strings.NewReader(`{"decision_state":"shadow_live","notes":"approved for shadow live"}`),
+	)
+	updateResp := httptest.NewRecorder()
+	router.ServeHTTP(updateResp, updateReq)
+
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for PATCH /ml/policy/validation-runs/1: %d body=%s", updateResp.Code, updateResp.Body.String())
+	}
+
+	var updated mlPolicyValidationRunDTO
+	if err := json.Unmarshal(updateResp.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated policy validation run: %v", err)
+	}
+	if updated.DecisionState != domain.PolicyDecisionShadowLive || updated.Notes != "approved for shadow live" {
+		t.Fatalf("unexpected updated validation run: %+v", updated)
+	}
+
+	_, _ = signalRepo.Create(context.Background(), domain.SignalRun{
+		AssetID:           "SBER",
+		ModelVersion:      "baseline_stub_v1",
+		AsOfTime:          mustTime(t, "2026-04-22T10:00:00Z"),
+		SignalState:       domain.SignalStateActionable,
+		SignalDirection:   domain.SignalDirectionUp,
+		SignalProbability: 0.71,
+		ClassProbabilities: domain.SignalClassProbabilities{
+			Up:      0.71,
+			Down:    0.12,
+			NoTrade: 0.17,
+		},
+		Threshold:   0.65,
+		Timeframe:   "5m",
+		HorizonBars: 12,
+		Policy: &domain.SignalPolicySnapshot{
+			PolicyStatus:      "production_candidate",
+			ModelName:         "rf_multiclass",
+			ScenarioName:      "core_price_volume_only",
+			CalibrationMethod: "platt",
+			Threshold:         0.30,
+			DatasetVersion:    "test_live",
+		},
+	})
+
+	shadowReq := httptest.NewRequest(http.MethodGet, "/ml/policy/shadow-summary", nil)
+	shadowResp := httptest.NewRecorder()
+	router.ServeHTTP(shadowResp, shadowReq)
+
+	if shadowResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/policy/shadow-summary: %d body=%s", shadowResp.Code, shadowResp.Body.String())
+	}
+
+	var shadow mlPolicyShadowSummaryDTO
+	if err := json.Unmarshal(shadowResp.Body.Bytes(), &shadow); err != nil {
+		t.Fatalf("decode policy shadow summary: %v", err)
+	}
+	if shadow.ValidationRunID != 1 || shadow.SignalsTotal != 1 || shadow.ActionableSignals != 1 {
+		t.Fatalf("unexpected shadow summary: %+v", shadow)
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
 	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
 		DB:        &sql.DB{},
@@ -636,10 +811,72 @@ func (r *testSignalRepo) ListByAsset(_ context.Context, assetID string, limit in
 	return filtered, nil
 }
 
+func (r *testSignalRepo) ListByPolicySnapshot(
+	_ context.Context,
+	modelName string,
+	calibrationMethod string,
+	datasetVersion string,
+	limit int,
+) ([]domain.SignalRun, error) {
+	filtered := make([]domain.SignalRun, 0, len(r.items))
+	for i := len(r.items) - 1; i >= 0; i-- {
+		policy := r.items[i].Policy
+		if policy != nil &&
+			policy.ModelName == modelName &&
+			policy.CalibrationMethod == calibrationMethod &&
+			policy.DatasetVersion == datasetVersion {
+			filtered = append(filtered, r.items[i])
+		}
+		if len(filtered) == limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
+type testPolicyValidationRepo struct {
+	items []domain.PolicyValidationRun
+}
+
+func (r *testPolicyValidationRepo) Create(_ context.Context, run domain.PolicyValidationRun) (domain.PolicyValidationRun, error) {
+	run.ID = int64(len(r.items) + 1)
+	run.CreatedAt = time.Now().UTC()
+	r.items = append(r.items, run)
+	return run, nil
+}
+
+func (r *testPolicyValidationRepo) ListLatest(_ context.Context, limit int) ([]domain.PolicyValidationRun, error) {
+	if limit > len(r.items) {
+		limit = len(r.items)
+	}
+	out := make([]domain.PolicyValidationRun, 0, limit)
+	for i := len(r.items) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, r.items[i])
+	}
+	return out, nil
+}
+
+func (r *testPolicyValidationRepo) UpdateDecisionState(
+	_ context.Context,
+	id int64,
+	decisionState string,
+	notes string,
+) (domain.PolicyValidationRun, error) {
+	for index := range r.items {
+		if r.items[index].ID == id {
+			r.items[index].DecisionState = decisionState
+			r.items[index].Notes = notes
+			return r.items[index], nil
+		}
+	}
+	return domain.PolicyValidationRun{}, sql.ErrNoRows
+}
+
 var _ repository.AssetRepository = (*testAssetRepo)(nil)
 var _ repository.WatchlistRepository = (*testWatchlistRepo)(nil)
 var _ repository.ModelRegistryRepository = (*testModelRepo)(nil)
 var _ repository.SignalRunRepository = (*testSignalRepo)(nil)
+var _ repository.PolicyValidationRunRepository = (*testPolicyValidationRepo)(nil)
 
 func writeTestManifest(t *testing.T) string {
 	t.Helper()

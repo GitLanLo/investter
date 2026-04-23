@@ -101,7 +101,56 @@ type SignalRun struct {
 	Threshold          float64
 	Timeframe          string
 	HorizonBars        int
+	Policy             *SignalPolicySnapshot
 	CreatedAt          time.Time
+}
+
+type SignalPolicySnapshot struct {
+	PolicyStatus      string
+	ModelName         string
+	ScenarioName      string
+	CalibrationMethod string
+	Threshold         float64
+	DatasetVersion    string
+}
+
+type PolicyValidationRun struct {
+	ID                int64
+	PolicyStatus      string
+	ModelName         string
+	ScenarioName      string
+	CalibrationMethod string
+	Threshold         float64
+	DatasetVersion    string
+	Validation        PolicyValidationMetrics
+	Test              PolicyValidationMetrics
+	DecisionState     string
+	Notes             string
+	CreatedAt         time.Time
+}
+
+type PolicyValidationMetrics struct {
+	ActionableF1  float64
+	Precision     float64
+	Coverage      float64
+	ActionableECE float64
+}
+
+type PolicyShadowSummary struct {
+	ValidationRunID   int64
+	DecisionState     string
+	ModelName         string
+	CalibrationMethod string
+	Threshold         float64
+	DatasetVersion    string
+	SignalsTotal      int
+	ActionableSignals int
+	NoTradeSignals    int
+	UpSignals         int
+	DownSignals       int
+	ObservedCoverage  float64
+	FirstSignalAt     time.Time
+	LastSignalAt      time.Time
 }
 
 const (
@@ -113,4 +162,9 @@ const (
 	SignalDirectionUp   = "up"
 	SignalDirectionDown = "down"
 	SignalDirectionNone = "none"
+
+	PolicyDecisionCandidate  = "candidate"
+	PolicyDecisionShadowLive = "shadow_live"
+	PolicyDecisionPromoted   = "promoted"
+	PolicyDecisionBlocked    = "blocked"
 )

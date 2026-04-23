@@ -155,7 +155,15 @@
       "model_version": "baseline_stub_v1",
       "threshold": 0.65,
       "timeframe": "5m",
-      "horizon_bars": 12
+      "horizon_bars": 12,
+      "policy": {
+        "policy_status": "calibration_review",
+        "model_name": "logreg_multiclass",
+        "scenario_name": "",
+        "calibration_method": "",
+        "threshold": 0.55,
+        "dataset_version": "mvp_live_20260422"
+      }
     }
   ]
 }
@@ -268,29 +276,125 @@
 {
   "generated_at": "2026-04-15T00:00:00Z",
   "policy_status": "production_candidate",
-  "model_name": "hgb_multiclass",
-  "scenario_name": "core_price_volume_only",
-  "calibration_method": "platt",
+  "model_name": "logreg_multiclass",
+  "scenario_name": "",
+  "calibration_method": "identity",
   "threshold": 0.3,
   "timeframe": "5m",
   "horizon_bars": 12,
-  "dataset_version": "mvp_live_wf_20260409",
+  "dataset_version": "mvp_live_20260422",
   "feature_schema": "feature_v1",
-  "train_rows": 7247,
-  "validation_rows": 1535,
-  "test_rows": 1540,
+  "train_rows": 59145,
+  "validation_rows": 12771,
+  "test_rows": 12641,
   "validation": {
-    "actionable_f1": 0.3659,
-    "precision": 0.3655,
-    "coverage": 0.5401,
-    "actionable_ece": 0.0098
+    "actionable_f1": 0.343,
+    "precision": 0.3082,
+    "coverage": 0.4939,
+    "actionable_ece": 0.1647
   },
   "test": {
-    "actionable_f1": 0.2686,
-    "precision": 0.252,
-    "coverage": 0.4792,
-    "actionable_ece": 0.1155
+    "actionable_f1": 0.3095,
+    "precision": 0.2885,
+    "coverage": 0.4291,
+    "actionable_ece": 0.1763
   }
+}
+```
+
+### `GET /ml/policy/validation-runs`
+
+- назначение: список сохранённых проверок production policy перед shadow/live promotion
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "policy_status": "production_candidate",
+      "model_name": "logreg_multiclass",
+      "scenario_name": "",
+      "calibration_method": "identity",
+      "threshold": 0.3,
+      "dataset_version": "mvp_live_20260422",
+      "validation": {
+        "actionable_f1": 0.343,
+        "precision": 0.3082,
+        "coverage": 0.4939,
+        "actionable_ece": 0.1647
+      },
+      "test": {
+        "actionable_f1": 0.3095,
+        "precision": 0.2885,
+        "coverage": 0.4291,
+        "actionable_ece": 0.1763
+      },
+      "decision_state": "candidate",
+      "notes": "shadow candidate",
+      "created_at": "2026-04-21T15:00:00Z"
+    }
+  ]
+}
+```
+
+### `POST /ml/policy/validation-runs`
+
+- назначение: сохранить текущий normalized production policy snapshot как validation run
+- status: implemented
+- request example:
+
+```json
+{
+  "notes": "shadow candidate"
+}
+```
+
+- response: один объект из `GET /ml/policy/validation-runs`.
+
+### `PATCH /ml/policy/validation-runs/{id}`
+
+- назначение: операторский переход validation run между decision states перед shadow/live promotion
+- status: implemented
+- allowed `decision_state`: `candidate`, `shadow_live`, `promoted`, `blocked`
+- request example:
+
+```json
+{
+  "decision_state": "shadow_live",
+  "notes": "approved for shadow validation"
+}
+```
+
+- response: один объект из `GET /ml/policy/validation-runs`.
+
+### `GET /ml/policy/shadow-summary`
+
+- назначение: aggregate snapshot по сигналам, сохранённым с persisted policy metadata в `signal_runs`
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "validation_run_id": 2,
+  "decision_state": "shadow_live",
+  "model_name": "logreg_multiclass",
+  "calibration_method": "identity",
+  "threshold": 0.3,
+  "dataset_version": "mvp_live_20260422",
+  "signals_total": 24,
+  "actionable_signals": 9,
+  "no_trade_signals": 15,
+  "up_signals": 5,
+  "down_signals": 4,
+  "observed_coverage": 0.375,
+  "first_signal_at": "2026-04-22T10:00:00Z",
+  "last_signal_at": "2026-04-22T13:38:00Z"
 }
 ```
 

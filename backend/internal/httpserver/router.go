@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -115,6 +116,16 @@ type signalDTO struct {
 	Threshold          float64                `json:"threshold"`
 	Timeframe          string                 `json:"timeframe"`
 	HorizonBars        int                    `json:"horizon_bars"`
+	Policy             *signalPolicyDTO       `json:"policy,omitempty"`
+}
+
+type signalPolicyDTO struct {
+	PolicyStatus      string  `json:"policy_status"`
+	ModelName         string  `json:"model_name"`
+	ScenarioName      string  `json:"scenario_name"`
+	CalibrationMethod string  `json:"calibration_method"`
+	Threshold         float64 `json:"threshold"`
+	DatasetVersion    string  `json:"dataset_version"`
 }
 
 type signalProbabilitiesDTO struct {
@@ -170,6 +181,51 @@ type mlProductionPolicyMetricsDTO struct {
 	Precision     float64 `json:"precision"`
 	Coverage      float64 `json:"coverage"`
 	ActionableECE float64 `json:"actionable_ece"`
+}
+
+type mlPolicyValidationRunsResponse struct {
+	Items []mlPolicyValidationRunDTO `json:"items"`
+}
+
+type mlPolicyValidationRunCreateRequest struct {
+	Notes string `json:"notes"`
+}
+
+type mlPolicyValidationRunUpdateRequest struct {
+	DecisionState string `json:"decision_state"`
+	Notes         string `json:"notes"`
+}
+
+type mlPolicyValidationRunDTO struct {
+	ID                int64                        `json:"id"`
+	PolicyStatus      string                       `json:"policy_status"`
+	ModelName         string                       `json:"model_name"`
+	ScenarioName      string                       `json:"scenario_name"`
+	CalibrationMethod string                       `json:"calibration_method"`
+	Threshold         float64                      `json:"threshold"`
+	DatasetVersion    string                       `json:"dataset_version"`
+	Validation        mlProductionPolicyMetricsDTO `json:"validation"`
+	Test              mlProductionPolicyMetricsDTO `json:"test"`
+	DecisionState     string                       `json:"decision_state"`
+	Notes             string                       `json:"notes"`
+	CreatedAt         string                       `json:"created_at"`
+}
+
+type mlPolicyShadowSummaryDTO struct {
+	ValidationRunID   int64   `json:"validation_run_id"`
+	DecisionState     string  `json:"decision_state"`
+	ModelName         string  `json:"model_name"`
+	CalibrationMethod string  `json:"calibration_method"`
+	Threshold         float64 `json:"threshold"`
+	DatasetVersion    string  `json:"dataset_version"`
+	SignalsTotal      int     `json:"signals_total"`
+	ActionableSignals int     `json:"actionable_signals"`
+	NoTradeSignals    int     `json:"no_trade_signals"`
+	UpSignals         int     `json:"up_signals"`
+	DownSignals       int     `json:"down_signals"`
+	ObservedCoverage  float64 `json:"observed_coverage"`
+	FirstSignalAt     string  `json:"first_signal_at,omitempty"`
+	LastSignalAt      string  `json:"last_signal_at,omitempty"`
 }
 
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
@@ -332,9 +388,10 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			return
 		}
 
+		policy := currentSignalPolicyDTO(r.Context(), deps)
 		out := signalsResponse{Items: make([]signalDTO, 0, len(items))}
 		for _, item := range items {
-			out.Items = append(out.Items, toSignalDTO(item))
+			out.Items = append(out.Items, toSignalDTO(item, policy))
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
@@ -508,7 +565,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusCreated, toSignalDTO(run))
+		writeJSON(w, http.StatusCreated, toSignalDTO(run, currentSignalPolicyDTO(r.Context(), deps)))
 	})
 
 	mux.HandleFunc("/signals/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -533,9 +590,10 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			return
 		}
 
+		policy := currentSignalPolicyDTO(r.Context(), deps)
 		out := signalsResponse{Items: make([]signalDTO, 0, len(items))}
 		for _, item := range items {
-			out.Items = append(out.Items, toSignalDTO(item))
+			out.Items = append(out.Items, toSignalDTO(item, policy))
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
@@ -617,6 +675,124 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		writeJSON(w, http.StatusOK, toProductionPolicyDTO(policy))
 	})
 
+	mux.HandleFunc("/ml/policy/validation-runs", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Policy == nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", "policy validation service is not configured", nil)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			limit := 20
+			if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+				parsed, err := strconv.Atoi(rawLimit)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+					return
+				}
+				limit = parsed
+			}
+
+			items, err := deps.Container.Services.Policy.ListLatest(r.Context(), limit)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "policy_validation_list_failed", err.Error(), nil)
+				return
+			}
+			out := mlPolicyValidationRunsResponse{Items: make([]mlPolicyValidationRunDTO, 0, len(items))}
+			for _, item := range items {
+				out.Items = append(out.Items, toPolicyValidationRunDTO(item))
+			}
+			writeJSON(w, http.StatusOK, out)
+		case http.MethodPost:
+			var req mlPolicyValidationRunCreateRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					writeError(w, http.StatusBadRequest, "invalid_json", "invalid request payload", nil)
+					return
+				}
+			}
+
+			item, err := deps.Container.Services.Policy.CreateFromCurrentPolicy(r.Context(), req.Notes)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "policy_validation_create_failed", err.Error(), nil)
+				return
+			}
+			writeJSON(w, http.StatusCreated, toPolicyValidationRunDTO(item))
+		default:
+			writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+		}
+	})
+
+	mux.HandleFunc("/ml/policy/validation-runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Policy == nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", "policy validation service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPatch {
+			writeMethodNotAllowed(w, http.MethodPatch)
+			return
+		}
+
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "validation_error", "id must be a positive integer", nil)
+			return
+		}
+
+		var req mlPolicyValidationRunUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", "invalid request payload", nil)
+			return
+		}
+
+		item, err := deps.Container.Services.Policy.UpdateDecisionState(r.Context(), id, req.DecisionState, req.Notes)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrPolicyDecisionStateInvalid):
+				writeError(w, http.StatusBadRequest, "validation_error", "decision_state is invalid", nil)
+			case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+				writeError(w, http.StatusNotFound, "policy_validation_run_not_found", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "policy_validation_update_failed", err.Error(), nil)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, toPolicyValidationRunDTO(item))
+	})
+
+	mux.HandleFunc("/ml/policy/shadow-summary", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Policy == nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", "policy validation service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		limit := 1000
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+
+		summary, err := deps.Container.Services.Policy.LoadShadowSummary(r.Context(), limit)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+				writeError(w, http.StatusNotFound, "policy_validation_run_not_found", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "policy_shadow_summary_failed", err.Error(), nil)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, toPolicyShadowSummaryDTO(summary))
+	})
+
 	return loggingMiddleware(corsMiddleware(mux))
 }
 
@@ -660,7 +836,35 @@ func writeMethodNotAllowed(w http.ResponseWriter, methods ...string) {
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 }
 
-func toSignalDTO(run domain.SignalRun) signalDTO {
+func currentSignalPolicyDTO(ctx context.Context, deps Dependencies) *signalPolicyDTO {
+	if deps.Container.Services.Research == nil {
+		return nil
+	}
+	policy, err := deps.Container.Services.Research.LoadProductionPolicy(ctx)
+	if err != nil || policy.PolicyStatus == "" {
+		return nil
+	}
+	return &signalPolicyDTO{
+		PolicyStatus:      policy.PolicyStatus,
+		ModelName:         policy.ModelName,
+		ScenarioName:      policy.ScenarioName,
+		CalibrationMethod: policy.CalibrationMethod,
+		Threshold:         policy.Threshold,
+		DatasetVersion:    policy.DatasetVersion,
+	}
+}
+
+func toSignalDTO(run domain.SignalRun, policy *signalPolicyDTO) signalDTO {
+	if run.Policy != nil {
+		policy = &signalPolicyDTO{
+			PolicyStatus:      run.Policy.PolicyStatus,
+			ModelName:         run.Policy.ModelName,
+			ScenarioName:      run.Policy.ScenarioName,
+			CalibrationMethod: run.Policy.CalibrationMethod,
+			Threshold:         run.Policy.Threshold,
+			DatasetVersion:    run.Policy.DatasetVersion,
+		}
+	}
 	return signalDTO{
 		AssetID:           run.AssetID,
 		AsOfTime:          run.AsOfTime.UTC().Format(time.RFC3339),
@@ -676,6 +880,7 @@ func toSignalDTO(run domain.SignalRun) signalDTO {
 		Threshold:    run.Threshold,
 		Timeframe:    run.Timeframe,
 		HorizonBars:  run.HorizonBars,
+		Policy:       policy,
 	}
 }
 
@@ -708,4 +913,55 @@ func toProductionPolicyMetricsDTO(metrics service.ProductionPolicyMetrics) mlPro
 		Coverage:      metrics.Coverage,
 		ActionableECE: metrics.ActionableECE,
 	}
+}
+
+func toPolicyValidationRunDTO(run domain.PolicyValidationRun) mlPolicyValidationRunDTO {
+	return mlPolicyValidationRunDTO{
+		ID:                run.ID,
+		PolicyStatus:      run.PolicyStatus,
+		ModelName:         run.ModelName,
+		ScenarioName:      run.ScenarioName,
+		CalibrationMethod: run.CalibrationMethod,
+		Threshold:         run.Threshold,
+		DatasetVersion:    run.DatasetVersion,
+		Validation: mlProductionPolicyMetricsDTO{
+			ActionableF1:  run.Validation.ActionableF1,
+			Precision:     run.Validation.Precision,
+			Coverage:      run.Validation.Coverage,
+			ActionableECE: run.Validation.ActionableECE,
+		},
+		Test: mlProductionPolicyMetricsDTO{
+			ActionableF1:  run.Test.ActionableF1,
+			Precision:     run.Test.Precision,
+			Coverage:      run.Test.Coverage,
+			ActionableECE: run.Test.ActionableECE,
+		},
+		DecisionState: run.DecisionState,
+		Notes:         run.Notes,
+		CreatedAt:     run.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func toPolicyShadowSummaryDTO(summary domain.PolicyShadowSummary) mlPolicyShadowSummaryDTO {
+	out := mlPolicyShadowSummaryDTO{
+		ValidationRunID:   summary.ValidationRunID,
+		DecisionState:     summary.DecisionState,
+		ModelName:         summary.ModelName,
+		CalibrationMethod: summary.CalibrationMethod,
+		Threshold:         summary.Threshold,
+		DatasetVersion:    summary.DatasetVersion,
+		SignalsTotal:      summary.SignalsTotal,
+		ActionableSignals: summary.ActionableSignals,
+		NoTradeSignals:    summary.NoTradeSignals,
+		UpSignals:         summary.UpSignals,
+		DownSignals:       summary.DownSignals,
+		ObservedCoverage:  summary.ObservedCoverage,
+	}
+	if !summary.FirstSignalAt.IsZero() {
+		out.FirstSignalAt = summary.FirstSignalAt.UTC().Format(time.RFC3339)
+	}
+	if !summary.LastSignalAt.IsZero() {
+		out.LastSignalAt = summary.LastSignalAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }

@@ -138,8 +138,31 @@ a {
 .section-heading > *,
 .chart-inspector > *,
 .scenario-top > *,
-.signal-row > * {
+.signal-row > *,
+.policy-run-row > * {
   min-width: 0;
+}
+
+.asset-pill,
+.metric,
+.chart-metric,
+.candidate-card,
+.scenario-card,
+.method-card,
+.policy-run-row,
+.signal-row,
+.artifact-row,
+.section-note {
+  overflow-wrap: anywhere;
+}
+
+.metric strong,
+.chart-metric strong,
+.candidate-card h4,
+.signal-row-title,
+.scenario-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar h1,
@@ -338,12 +361,17 @@ a {
   color: var(--muted);
   font-size: 0.82rem;
   margin-bottom: 10px;
+  line-height: 1.22;
 }
 
 .metric strong,
 .chart-metric strong {
   font-size: clamp(1.15rem, 1.7vw, 1.55rem);
   line-height: 1.05;
+  max-width: 100%;
+  min-height: 1.1em;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .metric-warn {
@@ -368,7 +396,7 @@ a {
 .signal-console {
   min-height: 720px;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto 1fr;
 }
 
 .factors-panel {
@@ -377,6 +405,7 @@ a {
 }
 
 .intelligence-panel,
+.policy-validation-panel,
 .artifact-board {
   grid-column: span 7;
   min-height: 420px;
@@ -529,31 +558,62 @@ a {
 
 .chart-inspector-copy {
   display: grid;
+  grid-template-rows: 58px 48px;
   gap: 10px;
+  align-content: center;
   min-width: 0;
+  min-height: 140px;
 }
 
 .chart-inspector-title {
-  min-height: 2.2em;
+  display: flex;
+  align-items: center;
+  height: 58px;
+  min-height: 58px;
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-overflow: ellipsis;
+}
+
+.chart-inspector-title-range {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-overflow: clip;
 }
 
 .chart-inspector-meta {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 34px;
+  align-items: start;
+  height: 48px;
+  min-height: 48px;
+  overflow: visible;
 }
 
 .chart-inspector-note {
+  min-width: 0;
   color: var(--muted);
   font-size: 0.88rem;
+  line-height: 1.25;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-overflow: clip;
 }
 
 .chart-inspector-tag {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -651,6 +711,54 @@ a {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.chart-scroll-frame {
+  position: relative;
+  min-width: 0;
+}
+
+.chart-scroll-viewport {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  border-radius: 24px;
+  padding-bottom: 6px;
+}
+
+.chart-scroll-viewport:focus-visible {
+  outline: 2px solid rgba(208, 105, 49, 0.48);
+  outline-offset: 3px;
+}
+
+.chart-scroll-canvas {
+  min-width: 100%;
+  height: 380px;
+}
+
+.chart-y-axis-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 78px;
+  height: 380px;
+  pointer-events: none;
+  border-radius: 0 24px 24px 0;
+  background: linear-gradient(90deg, rgba(255, 250, 242, 0), rgba(255, 250, 242, 0.92) 34%, rgba(255, 250, 242, 0.98));
+}
+
+.chart-y-axis-tick {
+  position: absolute;
+  right: 12px;
+  transform: translateY(-50%);
+  color: rgba(17, 25, 35, 0.62);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .chart-grid-line {
@@ -958,8 +1066,10 @@ a {
 }
 
 .probability-stack,
+.policy-compare-strip,
 .split-stack,
 .signal-list,
+.policy-run-list,
 .scenario-list,
 .method-list {
   display: grid;
@@ -967,6 +1077,7 @@ a {
 }
 
 .signal-list,
+.policy-run-list,
 .scenario-list,
 .method-list,
 .candidate-grid {
@@ -974,9 +1085,34 @@ a {
 }
 
 .probability-stack,
+.policy-compare-strip,
 .split-stack,
 .method-list {
   grid-template-columns: 1fr;
+}
+
+.policy-compare-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.policy-compare-strip .metric {
+  min-height: 96px;
+  padding: 14px;
+  align-content: center;
+  gap: 10px;
+}
+
+.policy-compare-strip .metric span {
+  margin-bottom: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.policy-compare-strip .metric strong {
+  font-size: clamp(1rem, 1.45vw, 1.28rem);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .scenario-list {
@@ -1089,6 +1225,7 @@ a {
 .scenario-card,
 .method-card,
 .candidate-card,
+.policy-run-row,
 .artifact-row,
 .signal-row {
   border: 1px solid var(--border);
@@ -1169,7 +1306,8 @@ a {
 
 .candidate-card,
 .scenario-card,
-.method-card {
+.method-card,
+.policy-run-row {
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1191,6 +1329,107 @@ a {
   border-color: rgba(208, 105, 49, 0.22);
 }
 
+.policy-validation-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  min-height: 360px;
+}
+
+.policy-validation-copy {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(22, 32, 43, 0.1);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(30, 118, 133, 0.14), transparent 36%),
+    rgba(255, 255, 255, 0.5);
+}
+
+.policy-validation-copy p,
+.empty-note,
+.policy-run-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.shadow-summary-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(22, 32, 43, 0.1);
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.shadow-summary-title {
+  margin: 0;
+  color: var(--accent-2);
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.shadow-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shadow-summary-grid .metric {
+  min-height: 78px;
+  padding: 12px;
+}
+
+.shadow-summary-grid .metric strong {
+  font-size: clamp(1rem, 1.35vw, 1.2rem);
+}
+
+.policy-run-list {
+  align-content: start;
+}
+
+.policy-run-row {
+  gap: 16px;
+}
+
+.policy-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.policy-run-action {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.policy-run-action:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.policy-run-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.policy-run-metrics .metric {
+  min-height: 86px;
+}
+
 .candidate-title,
 .scenario-name {
   margin: 0 0 8px;
@@ -1205,11 +1444,15 @@ a {
   font-size: clamp(1.05rem, 2vw, 1.25rem);
   margin-bottom: 6px;
   min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .candidate-meta {
   margin: 0;
   min-height: 2.8em;
+  overflow-wrap: anywhere;
 }
 
 .candidate-gate {
@@ -1287,11 +1530,15 @@ a {
 
 .signal-row-title {
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .signal-row-meta {
   font-size: 0.9rem;
   margin-top: 6px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chart-empty {
@@ -1347,6 +1594,11 @@ a {
   word-break: break-word;
 }
 
+.chart-inspector-note {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .metric strong,
 .signal-probability,
 .badge,
@@ -1387,6 +1639,7 @@ a {
 .candidate-card,
 .scenario-card,
 .method-card,
+.policy-run-row,
 .signal-row,
 .factor-chip,
 .chart-shell,
@@ -1396,6 +1649,7 @@ a {
 
 .intelligence-panel,
 .dataset-panel,
+.policy-validation-panel,
 .artifact-board,
 .calibration-board,
 .signal-feed {
@@ -1406,6 +1660,7 @@ a {
 @media (max-width: 1120px) {
   .hero,
   .candidate-grid,
+  .policy-validation-layout,
   .scenario-list,
   .signal-list {
     grid-template-columns: 1fr;
@@ -1416,6 +1671,7 @@ a {
   .factors-panel,
   .intelligence-panel,
   .dataset-panel,
+  .policy-validation-panel,
   .artifact-board,
   .calibration-board {
     grid-column: 1 / -1;
@@ -1431,6 +1687,10 @@ a {
   .chart-window-shell {
     width: min(100vw - 20px, 1680px);
     padding-top: 16px;
+  }
+
+  .policy-run-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .topbar {
@@ -1673,6 +1933,10 @@ body::before {
   grid-column: span 8;
 }
 
+.policy-validation-panel {
+  grid-column: span 8;
+}
+
 .dataset-panel,
 .calibration-board {
   grid-column: span 4;
@@ -1754,7 +2018,6 @@ body::before {
 }
 
 .chart-inspector-copy {
-  min-height: 94px;
   align-content: center;
   padding: 14px 16px;
   border: 1px solid rgba(17, 25, 35, 0.08);
@@ -1763,7 +2026,6 @@ body::before {
 }
 
 .chart-inspector-title {
-  min-height: 1.1em;
   font-size: clamp(1.28rem, 2vw, 1.72rem);
 }
 
@@ -1798,10 +2060,12 @@ body::before {
 }
 
 .chart-svg {
+  height: 380px;
   border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.2));
   border: 1px solid rgba(17, 25, 35, 0.08);
+  min-width: 980px;
 }
 
 .chart-grid-line {
@@ -1939,6 +2203,7 @@ body::before {
   .factors-panel,
   .intelligence-panel,
   .dataset-panel,
+  .policy-validation-panel,
   .artifact-board,
   .calibration-board {
     grid-column: 1 / -1;
@@ -1984,11 +2249,16 @@ body::before {
 
   .chart-summary-grid,
   .chart-footer,
+  .policy-run-metrics,
+  .policy-compare-strip,
   .signal-list {
     grid-template-columns: 1fr;
   }
 
-  .chart-inspector-copy,
+  .chart-inspector-copy {
+    min-height: 140px;
+  }
+
   .inspector-stat {
     min-height: 76px;
   }

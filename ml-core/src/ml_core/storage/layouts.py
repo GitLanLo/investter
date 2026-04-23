@@ -131,7 +131,7 @@ def write_partitioned_frame(
                 partition_df = pd.concat([existing, partition_df], ignore_index=True)
                 partition_df = (
                     partition_df.sort_values(time_column)
-                    .drop_duplicates(subset=[time_column], keep="last")
+                    .drop_duplicates(subset=_dedupe_subset(partition_df, time_column), keep="last")
                     .reset_index(drop=True)
                 )
             for existing_file in existing_files:
@@ -183,9 +183,22 @@ def _load_parquet_files(files: Iterable[Path]) -> pd.DataFrame:
     for candidate in ("asof_time", "timestamp"):
         if candidate in out.columns:
             out[candidate] = pd.to_datetime(out[candidate], utc=True)
-            out = out.sort_values(candidate).drop_duplicates(subset=[candidate], keep="last").reset_index(drop=True)
+            out = (
+                out.sort_values(candidate)
+                .drop_duplicates(subset=_dedupe_subset(out, candidate), keep="last")
+                .reset_index(drop=True)
+            )
             break
     return out
+
+
+def _dedupe_subset(df: pd.DataFrame, time_column: str) -> list[str]:
+    dimensions = [
+        column
+        for column in ("ticker", "factor_alias", "factor", "timeframe")
+        if column in df.columns
+    ]
+    return [time_column, *dimensions]
 
 
 def _to_utc_timestamp(value: pd.Timestamp) -> pd.Timestamp:

@@ -73,6 +73,7 @@ invest-ml tinkoff-sync-universe \
 6. Валидирует, что incremental state относится к тому же `uid/figi/class_code`, и не даёт смешать другой инструмент в тот же raw path.
 7. Сохраняет watermark последней записанной свечи даже если очередной incremental-run не принёс новых данных.
 8. Складывает результат в raw parquet layout проекта.
+9. Пишет raw QA report по строкам, дублям, null values и диапазону свечей.
 
 ## Ограничения
 
@@ -80,6 +81,7 @@ invest-ml tinkoff-sync-universe \
 - если по тикеру найдено несколько инструментов, нужно передать `--class-code`;
 - если нужно сознательно перемапить тот же `ticker` на другой инструмент, сначала нужно очистить соответствующий `ingest_state` и raw parquet partition;
 - для factor aliases необходимо явно задавать соответствующий биржевой тикер Tinkoff.
+- команды по умолчанию incremental; для полного backfill используйте `--no-incremental`, для повторного захвата хвоста используйте `--overlap-bars`.
 
 ## MVP factor notes
 

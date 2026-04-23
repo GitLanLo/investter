@@ -13,6 +13,10 @@ import type {
   FactorPoint,
   MLOverview,
   ArtifactDocument,
+  PolicyValidationRun,
+  PolicyValidationRunDTO,
+  PolicyShadowSummary,
+  PolicyShadowSummaryDTO,
   ProductionPolicyDTO,
   ProductionPolicySnapshot,
   ResearchOverviewDTO,
@@ -50,6 +54,10 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
       fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
     ]);
+    const [validationRuns, shadowSummary] = await Promise.all([
+      fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
+      fetchJson<PolicyShadowSummaryDTO>("/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
+    ]);
 
     return {
       generatedFrom: "api",
@@ -57,6 +65,8 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       latestSignals: signals.items.map(mapSignal),
       mlOverview: mapResearchOverview(overview),
       productionPolicy: mapProductionPolicy(productionPolicy),
+      policyValidationRuns: validationRuns.items.map(mapPolicyValidationRun),
+      policyShadowSummary: shadowSummary ? mapPolicyShadowSummary(shadowSummary) : undefined,
       artifactDocuments: documents.items.map(mapResearchDocument),
     };
   } catch {
@@ -130,6 +140,45 @@ export async function runAnalysisForAsset(assetId: string, timeframe: string): P
   return mapSignal((await response.json()) as SignalDTO);
 }
 
+export async function createPolicyValidationRun(notes: string): Promise<PolicyValidationRun> {
+  const response = await fetch(`${apiBaseUrl}/ml/policy/validation-runs`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ notes }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`policy validation run failed: ${response.status}`);
+  }
+
+  return mapPolicyValidationRun((await response.json()) as PolicyValidationRunDTO);
+}
+
+export async function updatePolicyValidationRun(
+  id: number,
+  decisionState: string,
+  notes: string,
+): Promise<PolicyValidationRun> {
+  const response = await fetch(`${apiBaseUrl}/ml/policy/validation-runs/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      decision_state: decisionState,
+      notes,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`policy validation update failed: ${response.status}`);
+  }
+
+  return mapPolicyValidationRun((await response.json()) as PolicyValidationRunDTO);
+}
+
 function mapAsset(dto: AssetDTO): AssetCard {
   return {
     id: dto.id,
@@ -156,6 +205,16 @@ function mapSignal(dto: SignalDTO): SignalCard {
     modelVersion: dto.model_version,
     horizonBars: dto.horizon_bars,
     classProbabilities: dto.class_probabilities,
+    policy: dto.policy
+      ? {
+          policyStatus: dto.policy.policy_status,
+          modelName: dto.policy.model_name,
+          scenarioName: dto.policy.scenario_name,
+          calibrationMethod: dto.policy.calibration_method,
+          threshold: dto.policy.threshold,
+          datasetVersion: dto.policy.dataset_version,
+        }
+      : undefined,
   };
 }
 
@@ -221,6 +280,42 @@ function mapProductionPolicyMetrics(raw: ProductionPolicyDTO["validation"]) {
     precision: raw.precision,
     coverage: raw.coverage,
     actionableEce: raw.actionable_ece,
+  };
+}
+
+function mapPolicyValidationRun(dto: PolicyValidationRunDTO): PolicyValidationRun {
+  return {
+    id: dto.id,
+    policyStatus: dto.policy_status,
+    modelName: dto.model_name,
+    scenarioName: dto.scenario_name,
+    calibrationMethod: dto.calibration_method,
+    threshold: dto.threshold,
+    datasetVersion: dto.dataset_version,
+    validation: mapProductionPolicyMetrics(dto.validation),
+    test: mapProductionPolicyMetrics(dto.test),
+    decisionState: dto.decision_state,
+    notes: dto.notes,
+    createdAt: dto.created_at,
+  };
+}
+
+function mapPolicyShadowSummary(dto: PolicyShadowSummaryDTO): PolicyShadowSummary {
+  return {
+    validationRunId: dto.validation_run_id,
+    decisionState: dto.decision_state,
+    modelName: dto.model_name,
+    calibrationMethod: dto.calibration_method,
+    threshold: dto.threshold,
+    datasetVersion: dto.dataset_version,
+    signalsTotal: dto.signals_total,
+    actionableSignals: dto.actionable_signals,
+    noTradeSignals: dto.no_trade_signals,
+    upSignals: dto.up_signals,
+    downSignals: dto.down_signals,
+    observedCoverage: dto.observed_coverage,
+    firstSignalAt: dto.first_signal_at,
+    lastSignalAt: dto.last_signal_at,
   };
 }
 

@@ -50,3 +50,5 @@ sprint2-smoke:
 
 sprint3-smoke: sprint2-smoke
 	curl -fsS 'http://127.0.0.1:8080/ml/policy/production' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/policy/validation-runs?limit=5' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/policy/shadow-summary?limit=1000' >/dev/null
