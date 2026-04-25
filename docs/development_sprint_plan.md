@@ -78,16 +78,16 @@ Exit criteria:
 Goal:
 allow the operator to search T-Bank instruments and add any suitable instrument to the local watchlist.
 
-Backend work:
+Completed:
 
 - Add T-Bank InstrumentsService adapter:
   - `FindInstrument`;
-  - `GetInstrumentBy`;
-  - `Shares`, `Futures`, `Etfs`, `Currencies` where needed.
+  - `GetInstrumentByUID`.
 - Add API endpoints:
-  - `GET /instruments/search?query=...&type=...`;
+  - `GET /instruments/search?query=...`;
   - `GET /instruments/{uid}`;
-  - extend `POST /watchlist` to accept `instrument_uid`, `figi`, `ticker`, `class_code`.
+  - extend `POST /watchlist` to accept `instrument_uid`;
+  - enrich `GET /watchlist` items with asset metadata.
 - Extend `assets` schema:
   - `figi`;
   - `instrument_uid`;
@@ -100,9 +100,6 @@ Backend work:
   - `first_1min_candle_date`;
   - `first_1day_candle_date`;
   - `model_supported`.
-
-Frontend work:
-
 - Add instrument search panel.
 - Add filters by instrument type.
 - Add instrument details preview.
@@ -118,6 +115,7 @@ Exit criteria:
 - Operator can search and add an instrument without editing config files.
 - Watchlist supports instruments beyond the hardcoded MVP set.
 - Unsupported instruments do not accidentally receive ML signals.
+- `make sprint5-check` passes.
 
 ## Sprint 6. Scheduled Data Refresh And Watchlist Live Loop
 

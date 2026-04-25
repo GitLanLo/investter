@@ -493,6 +493,115 @@ func TestProductionPolicyEndpoint(t *testing.T) {
 	}
 }
 
+func TestInstrumentCatalogEndpoints(t *testing.T) {
+	first1Min := mustTime(t, "2024-01-10T07:00:00Z")
+	first1Day := mustTime(t, "2020-01-10T07:00:00Z")
+	assetRepo := &testAssetRepo{assets: map[string]domain.Asset{}}
+	watchlistRepo := &testWatchlistRepo{}
+	instruments := &testInstrumentService{
+		items: map[string]domain.TinkoffInstrument{
+			"uid-sber": {
+				UID:                 "uid-sber",
+				Figi:                "figi-sber",
+				Ticker:              "SBER",
+				ClassCode:           "TQBR",
+				Isin:                "RU0009029540",
+				Lot:                 10,
+				Currency:            "rub",
+				Name:                "Sberbank",
+				Exchange:            "MOEX",
+				InstrumentType:      "share",
+				APITradeAvailable:   true,
+				First1MinCandleDate: &first1Min,
+				First1DayCandleDate: &first1Day,
+			},
+		},
+	}
+
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Assets:      service.NewAssetService(assetRepo),
+				Watchlist:   service.NewWatchlistService(watchlistRepo),
+				Instruments: instruments,
+			},
+		},
+	})
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/instruments/search?query=sbe", nil)
+	searchResp := httptest.NewRecorder()
+	router.ServeHTTP(searchResp, searchReq)
+
+	if searchResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /instruments/search: %d body=%s", searchResp.Code, searchResp.Body.String())
+	}
+
+	var searchResult instrumentsSearchResponse
+	if err := json.Unmarshal(searchResp.Body.Bytes(), &searchResult); err != nil {
+		t.Fatalf("decode instruments search: %v", err)
+	}
+	if len(searchResult.Items) != 1 || searchResult.Items[0].UID != "uid-sber" {
+		t.Fatalf("unexpected search result: %+v", searchResult)
+	}
+
+	detailsReq := httptest.NewRequest(http.MethodGet, "/instruments/uid-sber", nil)
+	detailsResp := httptest.NewRecorder()
+	router.ServeHTTP(detailsResp, detailsReq)
+
+	if detailsResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /instruments/{uid}: %d body=%s", detailsResp.Code, detailsResp.Body.String())
+	}
+
+	var instrument instrumentDTO
+	if err := json.Unmarshal(detailsResp.Body.Bytes(), &instrument); err != nil {
+		t.Fatalf("decode instrument details: %v", err)
+	}
+	if instrument.Ticker != "SBER" || instrument.ClassCode != "TQBR" {
+		t.Fatalf("unexpected instrument payload: %+v", instrument)
+	}
+
+	addReq := httptest.NewRequest(http.MethodPost, "/watchlist", strings.NewReader(`{"instrument_uid":"uid-sber","position":2}`))
+	addReq.Header.Set("Content-Type", "application/json")
+	addResp := httptest.NewRecorder()
+	router.ServeHTTP(addResp, addReq)
+
+	if addResp.Code != http.StatusCreated {
+		t.Fatalf("unexpected status for POST /watchlist: %d body=%s", addResp.Code, addResp.Body.String())
+	}
+
+	var created watchlistResponse
+	if err := json.Unmarshal(addResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode watchlist create response: %v", err)
+	}
+	if len(created.Items) != 1 || created.Items[0].AssetID != "uid-sber" {
+		t.Fatalf("unexpected watchlist payload: %+v", created)
+	}
+	if created.Items[0].Asset == nil || created.Items[0].Asset.Ticker != "SBER" || !created.Items[0].Asset.APITradeAvailable {
+		t.Fatalf("expected enriched asset metadata in watchlist item, got %+v", created.Items[0])
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/watchlist", nil)
+	listResp := httptest.NewRecorder()
+	router.ServeHTTP(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /watchlist: %d body=%s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed watchlistResponse
+	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode watchlist response: %v", err)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].Asset == nil || listed.Items[0].Asset.InstrumentUID != "uid-sber" {
+		t.Fatalf("unexpected enriched watchlist response: %+v", listed)
+	}
+}
+
 func TestPolicyValidationRunsEndpoint(t *testing.T) {
 	restoreNow := service.SetPolicyValidationNowForTest(mustTime(t, "2026-04-24T10:30:00Z"))
 	defer restoreNow()
@@ -874,22 +983,66 @@ func (r *testAssetRepo) GetByID(_ context.Context, id string) (domain.Asset, err
 	return asset, nil
 }
 
-func (r *testAssetRepo) Upsert(context.Context, domain.Asset) error {
+func (r *testAssetRepo) Upsert(_ context.Context, asset domain.Asset) error {
+	if r.assets == nil {
+		r.assets = map[string]domain.Asset{}
+	}
+	r.assets[asset.ID] = asset
 	return nil
 }
 
-type testWatchlistRepo struct{}
+type testWatchlistRepo struct {
+	items []domain.WatchlistItem
+}
 
 func (r *testWatchlistRepo) GetOrCreateByName(context.Context, string) (domain.Watchlist, error) {
 	return domain.Watchlist{ID: 1, Name: "default"}, nil
 }
 
-func (r *testWatchlistRepo) ListItems(context.Context, int64) ([]domain.WatchlistItem, error) {
-	return nil, nil
+func (r *testWatchlistRepo) ListItems(_ context.Context, _ int64) ([]domain.WatchlistItem, error) {
+	out := make([]domain.WatchlistItem, len(r.items))
+	copy(out, r.items)
+	return out, nil
 }
 
-func (r *testWatchlistRepo) AddItem(context.Context, int64, string, int) error {
+func (r *testWatchlistRepo) AddItem(_ context.Context, watchlistID int64, assetID string, position int) error {
+	for index := range r.items {
+		if r.items[index].AssetID == assetID {
+			r.items[index].Position = position
+			return nil
+		}
+	}
+	r.items = append(r.items, domain.WatchlistItem{
+		ID:          int64(len(r.items) + 1),
+		WatchlistID: watchlistID,
+		AssetID:     assetID,
+		Position:    position,
+		CreatedAt:   time.Now().UTC(),
+	})
 	return nil
+}
+
+type testInstrumentService struct {
+	items map[string]domain.TinkoffInstrument
+}
+
+func (s *testInstrumentService) FindInstrument(_ context.Context, query string) ([]domain.TinkoffInstrument, error) {
+	out := make([]domain.TinkoffInstrument, 0, len(s.items))
+	for _, item := range s.items {
+		if strings.Contains(strings.ToLower(item.Ticker), strings.ToLower(query)) ||
+			strings.Contains(strings.ToLower(item.Name), strings.ToLower(query)) {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *testInstrumentService) GetInstrumentByUID(_ context.Context, uid string) (domain.TinkoffInstrument, error) {
+	item, ok := s.items[uid]
+	if !ok {
+		return domain.TinkoffInstrument{}, sql.ErrNoRows
+	}
+	return item, nil
 }
 
 type testModelRepo struct {

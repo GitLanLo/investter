@@ -19,6 +19,10 @@ func (s *AssetService) List(ctx context.Context) ([]domain.Asset, error) {
 	return s.repo.List(ctx)
 }
 
+func (s *AssetService) GetByID(ctx context.Context, id string) (domain.Asset, error) {
+	return s.repo.GetByID(ctx, id)
+}
+
 func (s *AssetService) Upsert(ctx context.Context, asset domain.Asset) error {
 	return s.repo.Upsert(ctx, asset)
 }

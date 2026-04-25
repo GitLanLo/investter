@@ -115,8 +115,9 @@ type watchlistResponse struct {
 }
 
 type watchlistItemDTO struct {
-	AssetID  string `json:"asset_id"`
-	Position int    `json:"position"`
+	AssetID  string    `json:"asset_id"`
+	Position int       `json:"position"`
+	Asset    *assetDTO `json:"asset,omitempty"`
 }
 
 type watchlistUpsertRequest struct {
@@ -385,20 +386,20 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		out := assetsResponse{Items: make([]assetDTO, 0, len(items))}
 		for _, item := range items {
 			dto := assetDTO{
-				ID:                  item.ID,
-				Ticker:              item.Ticker,
-				Name:                item.Name,
-				Exchange:            item.Exchange,
-				Timeframe:           item.Timeframe,
-				IsActive:            item.IsActive,
-				Figi:                item.Figi,
-				InstrumentUID:       item.InstrumentUID,
-				ClassCode:           item.ClassCode,
-				InstrumentType:      item.InstrumentType,
-				Lot:                 item.Lot,
-				Currency:            item.Currency,
-				APITradeAvailable:   item.APITradeAvailable,
-				ModelSupported:      item.ModelSupported,
+				ID:                item.ID,
+				Ticker:            item.Ticker,
+				Name:              item.Name,
+				Exchange:          item.Exchange,
+				Timeframe:         item.Timeframe,
+				IsActive:          item.IsActive,
+				Figi:              item.Figi,
+				InstrumentUID:     item.InstrumentUID,
+				ClassCode:         item.ClassCode,
+				InstrumentType:    item.InstrumentType,
+				Lot:               item.Lot,
+				Currency:          item.Currency,
+				APITradeAvailable: item.APITradeAvailable,
+				ModelSupported:    item.ModelSupported,
 			}
 			if item.First1MinCandleDate != nil {
 				dto.First1MinCandleDate = item.First1MinCandleDate.UTC().Format(time.RFC3339)
@@ -585,10 +586,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 				Items:       make([]watchlistItemDTO, 0, len(items)),
 			}
 			for _, item := range items {
-				out.Items = append(out.Items, watchlistItemDTO{
-					AssetID:  item.AssetID,
-					Position: item.Position,
-				})
+				out.Items = append(out.Items, toWatchlistItemDTO(r.Context(), deps, item))
 			}
 
 			writeJSON(w, http.StatusOK, out)
@@ -659,10 +657,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 				Items:       make([]watchlistItemDTO, 0, len(items)),
 			}
 			for _, item := range items {
-				out.Items = append(out.Items, watchlistItemDTO{
-					AssetID:  item.AssetID,
-					Position: item.Position,
-				})
+				out.Items = append(out.Items, toWatchlistItemDTO(r.Context(), deps, item))
 			}
 
 			writeJSON(w, http.StatusCreated, out)
@@ -1129,7 +1124,12 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 
 		items, err := deps.Container.Services.Instruments.FindInstrument(r.Context(), query)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "instruments_search_failed", err.Error(), nil)
+			switch {
+			case errors.Is(err, service.ErrTinkoffUnavailable):
+				writeError(w, http.StatusServiceUnavailable, "instruments_unavailable", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "instruments_search_failed", err.Error(), nil)
+			}
 			return
 		}
 
@@ -1153,7 +1153,14 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		uid := r.PathValue("uid")
 		item, err := deps.Container.Services.Instruments.GetInstrumentByUID(r.Context(), uid)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "instrument_fetch_failed", err.Error(), nil)
+			switch {
+			case errors.Is(err, service.ErrTinkoffUnavailable):
+				writeError(w, http.StatusServiceUnavailable, "instruments_unavailable", err.Error(), nil)
+			case errors.Is(err, sql.ErrNoRows):
+				writeError(w, http.StatusNotFound, "instrument_not_found", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "instrument_fetch_failed", err.Error(), nil)
+			}
 			return
 		}
 
@@ -1393,6 +1400,23 @@ func toPolicyOutcomeRecordDTO(item domain.PolicyOutcomeRecord) mlPolicyOutcomeRe
 	}
 }
 
+func toWatchlistItemDTO(ctx context.Context, deps Dependencies, item domain.WatchlistItem) watchlistItemDTO {
+	out := watchlistItemDTO{
+		AssetID:  item.AssetID,
+		Position: item.Position,
+	}
+	if deps.Container.Services.Assets == nil {
+		return out
+	}
+	asset, err := deps.Container.Services.Assets.GetByID(ctx, item.AssetID)
+	if err != nil {
+		return out
+	}
+	dto := toAssetDTO(asset)
+	out.Asset = &dto
+	return out
+}
+
 func toJobRunDTO(item domain.JobRun) jobRunDTO {
 	out := jobRunDTO{
 		ID:        item.ID,
@@ -1406,6 +1430,32 @@ func toJobRunDTO(item domain.JobRun) jobRunDTO {
 	}
 	if item.ErrorMessage != "" {
 		out.ErrorMessage = item.ErrorMessage
+	}
+	return out
+}
+
+func toAssetDTO(asset domain.Asset) assetDTO {
+	out := assetDTO{
+		ID:                asset.ID,
+		Ticker:            asset.Ticker,
+		Name:              asset.Name,
+		Exchange:          asset.Exchange,
+		Timeframe:         asset.Timeframe,
+		IsActive:          asset.IsActive,
+		Figi:              asset.Figi,
+		InstrumentUID:     asset.InstrumentUID,
+		ClassCode:         asset.ClassCode,
+		InstrumentType:    asset.InstrumentType,
+		Lot:               asset.Lot,
+		Currency:          asset.Currency,
+		APITradeAvailable: asset.APITradeAvailable,
+		ModelSupported:    asset.ModelSupported,
+	}
+	if asset.First1MinCandleDate != nil {
+		out.First1MinCandleDate = asset.First1MinCandleDate.UTC().Format(time.RFC3339)
+	}
+	if asset.First1DayCandleDate != nil {
+		out.First1DayCandleDate = asset.First1DayCandleDate.UTC().Format(time.RFC3339)
 	}
 	return out
 }

@@ -1,19 +1,27 @@
 package service
 
 import (
+	"context"
+
+	"invest/backend/internal/domain"
 	"invest/backend/internal/repository"
 )
 
+type InstrumentService interface {
+	FindInstrument(ctx context.Context, query string) ([]domain.TinkoffInstrument, error)
+	GetInstrumentByUID(ctx context.Context, uid string) (domain.TinkoffInstrument, error)
+}
+
 type Services struct {
-	Assets     *AssetService
-	MarketData *MarketDataService
-	Watchlist  *WatchlistService
-	Models     *ModelRegistryService
-	Analysis   *AnalysisService
-	Research   *ResearchArtifactsService
-	Policy     *PolicyValidationService
-	Jobs       *JobService
-	Instruments *TinkoffAdapter
+	Assets      *AssetService
+	MarketData  *MarketDataService
+	Watchlist   *WatchlistService
+	Models      *ModelRegistryService
+	Analysis    *AnalysisService
+	Research    *ResearchArtifactsService
+	Policy      *PolicyValidationService
+	Jobs        *JobService
+	Instruments InstrumentService
 }
 
 func NewServices(
@@ -27,7 +35,7 @@ func NewServices(
 	policyRepo repository.PolicyValidationRunRepository,
 	mlDataRoot string,
 	mlResearchRoot string,
-	instruments *TinkoffAdapter,
+	instruments InstrumentService,
 ) Services {
 	research := NewResearchArtifactsService(mlDataRoot, mlResearchRoot)
 	policy := NewPolicyValidationService(policyRepo, research, signalRepo)
@@ -35,14 +43,14 @@ func NewServices(
 		policy = policy.WithOutcomeData(assetRepo, marketDataRepo, outcomeRepo)
 	}
 	return Services{
-		Assets:     NewAssetService(assetRepo),
-		MarketData: NewMarketDataService(assetRepo, marketDataRepo),
-		Watchlist:  NewWatchlistService(watchlistRepo),
-		Models:     NewModelRegistryService(modelRepo),
-		Analysis:   NewAnalysisService(assetRepo, modelRepo, signalRepo, research),
-		Research:   research,
-		Policy:     policy,
-		Jobs:       NewJobService(jobRepo, policy),
+		Assets:      NewAssetService(assetRepo),
+		MarketData:  NewMarketDataService(assetRepo, marketDataRepo),
+		Watchlist:   NewWatchlistService(watchlistRepo),
+		Models:      NewModelRegistryService(modelRepo),
+		Analysis:    NewAnalysisService(assetRepo, modelRepo, signalRepo, research),
+		Research:    research,
+		Policy:      policy,
+		Jobs:        NewJobService(jobRepo, policy),
 		Instruments: instruments,
 	}
 }

@@ -559,7 +559,7 @@
 ### `GET /watchlist`
 
 - назначение: список наблюдаемых инструментов
-- status: implemented for default watchlist
+- status: implemented for default watchlist with enriched asset metadata
 - response example:
 
 ```json
@@ -569,7 +569,23 @@
   "items": [
     {
       "asset_id": "SBER",
-      "position": 1
+      "position": 1,
+      "asset": {
+        "id": "SBER",
+        "ticker": "SBER",
+        "name": "Sberbank",
+        "exchange": "MOEX",
+        "timeframe": "5m",
+        "is_active": true,
+        "figi": "BBG004730N88",
+        "instrument_uid": "uid-sber",
+        "class_code": "TQBR",
+        "instrument_type": "share",
+        "lot": 10,
+        "currency": "rub",
+        "api_trade_available": true,
+        "model_supported": false
+      }
     }
   ]
 }
@@ -586,6 +602,51 @@
   "asset_id": "SBER"
 }
 ```
+
+Alternative request for discovered catalog instruments:
+
+```json
+{
+  "instrument_uid": "uid-sber",
+  "position": 2
+}
+```
+
+### `GET /instruments/search`
+
+- назначение: поиск инструментов через T-Bank InstrumentsService
+- status: implemented
+- query params:
+  - `query`
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "uid": "uid-sber",
+      "figi": "BBG004730N88",
+      "ticker": "SBER",
+      "class_code": "TQBR",
+      "isin": "RU0009029540",
+      "lot": 10,
+      "currency": "rub",
+      "name": "Sberbank",
+      "exchange": "MOEX",
+      "instrument_type": "share",
+      "api_trade_available": true,
+      "first_1min_candle_date": "2024-01-10T07:00:00Z",
+      "first_1day_candle_date": "2020-01-10T07:00:00Z"
+    }
+  ]
+}
+```
+
+### `GET /instruments/{uid}`
+
+- назначение: получить детальную metadata по выбранному instrument uid
+- status: implemented
+- response: same DTO as `GET /instruments/search`
 
 ### `POST /notifications/rules`
 

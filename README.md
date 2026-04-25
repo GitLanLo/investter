@@ -1,6 +1,6 @@
 # invest
 
-Рабочий Sprint 3 baseline для `invest`: backend, ML/data core, operator GUI и локальная инфраструктура.
+Рабочий Sprint 5 baseline для `invest`: backend, ML/data core, operator GUI, forward validation и instrument catalog.
 
 ## Что уже сделано
 
@@ -16,6 +16,8 @@
 - backend переведён на normal migration files с compose-compatible bootstrap.
 - Sprint 1 закрыт на реальных Tinkoff данных; baseline report: `docs/ml/baseline_report_sprint1.md`.
 - Sprint 3 закрыт; completion note: `docs/sprint3_completion.md`.
+- Sprint 4 закрыт; completion note: `docs/sprint4_completion.md`.
+- Sprint 5 закрыт; completion note: `docs/sprint5_completion.md`.
 - данные обновлены до `mvp_live_20260422`; активный Sprint 3 policy candidate: `logreg_multiclass` + `identity` calibration, threshold `0.30`, validation run `id=2` в состоянии `shadow_live`; refresh note: `docs/ml/data_refresh_20260422.md`.
 
 ## Структура
@@ -142,6 +144,19 @@ invest-ml run-research-pipeline \
 - persisted matured outcomes in `signal_outcomes`;
 - `make sprint4-check` extends Sprint 3 smoke with realised policy outcome metrics.
 
+## Sprint 5 status
+
+- Sprint 5 plan: `docs/sprint5_plan.md`;
+- Sprint 5 closure note: `docs/sprint5_completion.md`;
+- instrument catalog endpoints:
+  - `GET /instruments/search`
+  - `GET /instruments/{uid}`;
+- enriched watchlist contract:
+  - `GET /watchlist`
+  - `POST /watchlist`;
+- asset catalog migration `005_instrument_catalog.sql`;
+- `make sprint5-check` extends Sprint 4 smoke with watchlist/instrument catalog checks.
+
 ## Документы
 
 - `development_plan.md`
@@ -154,8 +169,10 @@ invest-ml run-research-pipeline \
 - `docs/sprint2_completion.md`
 - `docs/sprint3_completion.md`
 - `docs/sprint4_completion.md`
+- `docs/sprint5_completion.md`
 - `docs/sprint3_plan.md`
 - `docs/sprint4_plan.md`
+- `docs/sprint5_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`

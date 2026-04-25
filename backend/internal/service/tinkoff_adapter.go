@@ -3,11 +3,12 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"crypto/tls"
 	"net/http"
 	"strings"
 	"time"
@@ -21,11 +22,10 @@ type TinkoffAdapter struct {
 	client  *http.Client
 }
 
+var ErrTinkoffUnavailable = errors.New("tinkoff instruments service is not configured")
+
 func NewTinkoffAdapter(token string, target string) *TinkoffAdapter {
 	baseURL := "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService"
-	if target == "sandbox" {
-		baseURL = "https://sandbox-invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService"
-	}
 	if target == "sandbox" {
 		baseURL = "https://sandbox-invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService"
 	}
@@ -34,8 +34,10 @@ func NewTinkoffAdapter(token string, target string) *TinkoffAdapter {
 		token:   token,
 		baseURL: baseURL,
 		client: &http.Client{
-			Timeout:   10 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			},
 		},
 	}
 }
@@ -62,7 +64,7 @@ type getAssetsResponse struct {
 
 func (a *TinkoffAdapter) FindInstrument(ctx context.Context, query string) ([]domain.TinkoffInstrument, error) {
 	if a.token == "" {
-		return nil, errors.New("tinkoff token is missing")
+		return nil, ErrTinkoffUnavailable
 	}
 
 	reqBody := getAssetsRequest{
@@ -113,7 +115,7 @@ func (a *TinkoffAdapter) FindInstrument(ctx context.Context, query string) ([]do
 					Ticker:            inst.Ticker,
 					ClassCode:         inst.ClassCode,
 					Isin:              inst.Isin,
-					Lot:               1, // default
+					Lot:               1,     // default
 					Currency:          "rub", // default
 					Name:              asset.Name,
 					Exchange:          "",
@@ -172,7 +174,7 @@ type getInstrumentByResponse struct {
 
 func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, uid string) (domain.TinkoffInstrument, error) {
 	if a.token == "" {
-		return domain.TinkoffInstrument{}, errors.New("tinkoff token is missing")
+		return domain.TinkoffInstrument{}, ErrTinkoffUnavailable
 	}
 
 	reqBody := getInstrumentByRequest{
@@ -210,6 +212,9 @@ func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, uid string) (do
 	}
 
 	inst := payload.Instrument
+	if inst.Uid == "" {
+		return domain.TinkoffInstrument{}, sql.ErrNoRows
+	}
 	res := domain.TinkoffInstrument{
 		UID:               inst.Uid,
 		Figi:              inst.Figi,

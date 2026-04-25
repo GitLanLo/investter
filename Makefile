@@ -1,4 +1,4 @@
-.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke
+.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke
 
 backend-run:
 	cd backend && go run ./cmd/api
@@ -42,6 +42,8 @@ sprint3-check: backend-test frontend-build sprint3-smoke
 
 sprint4-check: backend-test frontend-build sprint4-smoke
 
+sprint5-check: backend-test frontend-build sprint5-smoke
+
 sprint2-smoke:
 	curl -fsS http://127.0.0.1:8080/health >/dev/null
 	curl -fsS http://127.0.0.1:8080/ready >/dev/null
@@ -62,3 +64,8 @@ sprint4-smoke: sprint3-smoke
 	curl -fsS -X POST 'http://127.0.0.1:8080/ml/policy/outcomes?limit=1000' >/dev/null
 	curl -fsS 'http://127.0.0.1:8080/ml/policy/outcomes?limit=1000' >/dev/null
 	curl -fsS 'http://127.0.0.1:8080/ml/policy/outcomes/history?limit=5' >/dev/null
+
+sprint5-smoke: sprint4-smoke
+	curl -fsS 'http://127.0.0.1:8080/watchlist' >/dev/null
+	curl -fsS -X POST 'http://127.0.0.1:8080/watchlist' -H 'Content-Type: application/json' -d '{"asset_id":"SBER","position":1}' >/dev/null
+	if [ -n "$$TINKOFF_INVEST_TOKEN" ]; then curl -fsS 'http://127.0.0.1:8080/instruments/search?query=sber' >/dev/null; fi
