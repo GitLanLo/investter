@@ -44,12 +44,42 @@ type assetsResponse struct {
 }
 
 type assetDTO struct {
-	ID        string `json:"id"`
-	Ticker    string `json:"ticker"`
-	Name      string `json:"name"`
-	Exchange  string `json:"exchange"`
-	Timeframe string `json:"timeframe"`
-	IsActive  bool   `json:"is_active"`
+	ID                  string `json:"id"`
+	Ticker              string `json:"ticker"`
+	Name                string `json:"name"`
+	Exchange            string `json:"exchange"`
+	Timeframe           string `json:"timeframe"`
+	IsActive            bool   `json:"is_active"`
+	Figi                string `json:"figi"`
+	InstrumentUID       string `json:"instrument_uid"`
+	ClassCode           string `json:"class_code"`
+	InstrumentType      string `json:"instrument_type"`
+	Lot                 int32  `json:"lot"`
+	Currency            string `json:"currency"`
+	APITradeAvailable   bool   `json:"api_trade_available"`
+	First1MinCandleDate string `json:"first_1min_candle_date,omitempty"`
+	First1DayCandleDate string `json:"first_1day_candle_date,omitempty"`
+	ModelSupported      bool   `json:"model_supported"`
+}
+
+type instrumentDTO struct {
+	UID                 string `json:"uid"`
+	Figi                string `json:"figi"`
+	Ticker              string `json:"ticker"`
+	ClassCode           string `json:"class_code"`
+	Isin                string `json:"isin"`
+	Lot                 int32  `json:"lot"`
+	Currency            string `json:"currency"`
+	Name                string `json:"name"`
+	Exchange            string `json:"exchange"`
+	InstrumentType      string `json:"instrument_type"`
+	APITradeAvailable   bool   `json:"api_trade_available"`
+	First1MinCandleDate string `json:"first_1min_candle_date,omitempty"`
+	First1DayCandleDate string `json:"first_1day_candle_date,omitempty"`
+}
+
+type instrumentsSearchResponse struct {
+	Items []instrumentDTO `json:"items"`
 }
 
 type candlesResponse struct {
@@ -90,8 +120,9 @@ type watchlistItemDTO struct {
 }
 
 type watchlistUpsertRequest struct {
-	AssetID  string `json:"asset_id"`
-	Position int    `json:"position"`
+	AssetID       string `json:"asset_id"`
+	InstrumentUID string `json:"instrument_uid"`
+	Position      int    `json:"position"`
 }
 
 type analysisRunRequest struct {
@@ -353,14 +384,29 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 
 		out := assetsResponse{Items: make([]assetDTO, 0, len(items))}
 		for _, item := range items {
-			out.Items = append(out.Items, assetDTO{
-				ID:        item.ID,
-				Ticker:    item.Ticker,
-				Name:      item.Name,
-				Exchange:  item.Exchange,
-				Timeframe: item.Timeframe,
-				IsActive:  item.IsActive,
-			})
+			dto := assetDTO{
+				ID:                  item.ID,
+				Ticker:              item.Ticker,
+				Name:                item.Name,
+				Exchange:            item.Exchange,
+				Timeframe:           item.Timeframe,
+				IsActive:            item.IsActive,
+				Figi:                item.Figi,
+				InstrumentUID:       item.InstrumentUID,
+				ClassCode:           item.ClassCode,
+				InstrumentType:      item.InstrumentType,
+				Lot:                 item.Lot,
+				Currency:            item.Currency,
+				APITradeAvailable:   item.APITradeAvailable,
+				ModelSupported:      item.ModelSupported,
+			}
+			if item.First1MinCandleDate != nil {
+				dto.First1MinCandleDate = item.First1MinCandleDate.UTC().Format(time.RFC3339)
+			}
+			if item.First1DayCandleDate != nil {
+				dto.First1DayCandleDate = item.First1DayCandleDate.UTC().Format(time.RFC3339)
+			}
+			out.Items = append(out.Items, dto)
 		}
 
 		writeJSON(w, http.StatusOK, out)
@@ -552,9 +598,42 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid_json", "invalid request payload", nil)
 				return
 			}
-			if req.AssetID == "" {
-				writeError(w, http.StatusBadRequest, "validation_error", "asset_id is required", nil)
+			assetID := req.AssetID
+			if assetID == "" && req.InstrumentUID != "" {
+				assetID = req.InstrumentUID
+			}
+			if assetID == "" {
+				writeError(w, http.StatusBadRequest, "validation_error", "asset_id or instrument_uid is required", nil)
 				return
+			}
+
+			if req.InstrumentUID != "" && deps.Container.Services.Instruments != nil {
+				inst, err := deps.Container.Services.Instruments.GetInstrumentByUID(r.Context(), req.InstrumentUID)
+				if err == nil {
+					domainAsset := domain.Asset{
+						ID:                inst.UID,
+						Ticker:            inst.Ticker,
+						Name:              inst.Name,
+						Exchange:          inst.Exchange,
+						Timeframe:         "5m",
+						IsActive:          true,
+						Figi:              inst.Figi,
+						InstrumentUID:     inst.UID,
+						ClassCode:         inst.ClassCode,
+						InstrumentType:    inst.InstrumentType,
+						Lot:               inst.Lot,
+						Currency:          inst.Currency,
+						APITradeAvailable: inst.APITradeAvailable,
+						ModelSupported:    false,
+					}
+					if inst.First1MinCandleDate != nil {
+						domainAsset.First1MinCandleDate = inst.First1MinCandleDate
+					}
+					if inst.First1DayCandleDate != nil {
+						domainAsset.First1DayCandleDate = inst.First1DayCandleDate
+					}
+					_ = deps.Container.Services.Assets.Upsert(r.Context(), domainAsset)
+				}
 			}
 
 			watchlist, err := deps.Container.Services.Watchlist.EnsureDefault(r.Context())
@@ -563,7 +642,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 				return
 			}
 
-			if err := deps.Container.Services.Watchlist.AddItem(r.Context(), watchlist.ID, req.AssetID, req.Position); err != nil {
+			if err := deps.Container.Services.Watchlist.AddItem(r.Context(), watchlist.ID, assetID, req.Position); err != nil {
 				writeError(w, http.StatusBadRequest, "watchlist_add_failed", err.Error(), nil)
 				return
 			}
@@ -1033,6 +1112,54 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		writeJSON(w, http.StatusOK, toJobRunDTO(item))
 	})
 
+	mux.HandleFunc("/instruments/search", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Instruments == nil {
+			writeError(w, http.StatusServiceUnavailable, "instruments_unavailable", "instruments service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		query := r.URL.Query().Get("query")
+		if query == "" {
+			writeError(w, http.StatusBadRequest, "validation_error", "query parameter is required", nil)
+			return
+		}
+
+		items, err := deps.Container.Services.Instruments.FindInstrument(r.Context(), query)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "instruments_search_failed", err.Error(), nil)
+			return
+		}
+
+		out := instrumentsSearchResponse{Items: make([]instrumentDTO, 0, len(items))}
+		for _, item := range items {
+			out.Items = append(out.Items, toInstrumentDTO(item))
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/instruments/{uid}", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Instruments == nil {
+			writeError(w, http.StatusServiceUnavailable, "instruments_unavailable", "instruments service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		uid := r.PathValue("uid")
+		item, err := deps.Container.Services.Instruments.GetInstrumentByUID(r.Context(), uid)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "instrument_fetch_failed", err.Error(), nil)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, toInstrumentDTO(item))
+	})
+
 	return loggingMiddleware(corsMiddleware(mux))
 }
 
@@ -1281,4 +1408,27 @@ func toJobRunDTO(item domain.JobRun) jobRunDTO {
 		out.ErrorMessage = item.ErrorMessage
 	}
 	return out
+}
+
+func toInstrumentDTO(inst domain.TinkoffInstrument) instrumentDTO {
+	dto := instrumentDTO{
+		UID:               inst.UID,
+		Figi:              inst.Figi,
+		Ticker:            inst.Ticker,
+		ClassCode:         inst.ClassCode,
+		Isin:              inst.Isin,
+		Lot:               inst.Lot,
+		Currency:          inst.Currency,
+		Name:              inst.Name,
+		Exchange:          inst.Exchange,
+		InstrumentType:    inst.InstrumentType,
+		APITradeAvailable: inst.APITradeAvailable,
+	}
+	if inst.First1MinCandleDate != nil {
+		dto.First1MinCandleDate = inst.First1MinCandleDate.UTC().Format(time.RFC3339)
+	}
+	if inst.First1DayCandleDate != nil {
+		dto.First1DayCandleDate = inst.First1DayCandleDate.UTC().Format(time.RFC3339)
+	}
+	return dto
 }

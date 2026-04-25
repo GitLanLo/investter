@@ -3,14 +3,24 @@ package domain
 import "time"
 
 type Asset struct {
-	ID        string
-	Ticker    string
-	Name      string
-	Exchange  string
-	Timeframe string
-	IsActive  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID                  string
+	Ticker              string
+	Name                string
+	Exchange            string
+	Timeframe           string
+	IsActive            bool
+	Figi                string
+	InstrumentUID       string
+	ClassCode           string
+	InstrumentType      string
+	Lot                 int32
+	Currency            string
+	APITradeAvailable   bool
+	First1MinCandleDate *time.Time
+	First1DayCandleDate *time.Time
+	ModelSupported      bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Candle struct {

@@ -21,6 +21,8 @@ services:
     build:
       context: ../backend
     container_name: invest-backend
+    env_file:
+      - ../.env
     environment:
       APP_ENV: ${APP_ENV:-dev}
       BACKEND_HOST: 0.0.0.0

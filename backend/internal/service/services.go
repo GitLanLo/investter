@@ -13,6 +13,7 @@ type Services struct {
 	Research   *ResearchArtifactsService
 	Policy     *PolicyValidationService
 	Jobs       *JobService
+	Instruments *TinkoffAdapter
 }
 
 func NewServices(
@@ -26,6 +27,7 @@ func NewServices(
 	policyRepo repository.PolicyValidationRunRepository,
 	mlDataRoot string,
 	mlResearchRoot string,
+	instruments *TinkoffAdapter,
 ) Services {
 	research := NewResearchArtifactsService(mlDataRoot, mlResearchRoot)
 	policy := NewPolicyValidationService(policyRepo, research, signalRepo)
@@ -41,5 +43,6 @@ func NewServices(
 		Research:   research,
 		Policy:     policy,
 		Jobs:       NewJobService(jobRepo, policy),
+		Instruments: instruments,
 	}
 }

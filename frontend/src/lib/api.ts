@@ -11,6 +11,8 @@ import type {
   CandleDTO,
   FactorDTO,
   FactorPoint,
+  InstrumentCard,
+  InstrumentDTO,
   MLOverview,
   ArtifactDocument,
   PolicyOutcomeSummary,
@@ -608,4 +610,38 @@ function stringArray(value: unknown): string[] {
     return [];
   }
   return value.filter((item): item is string => typeof item === "string");
+}
+
+export async function searchInstruments(query: string): Promise<InstrumentCard[]> {
+  const response = await fetchJson<{ items: InstrumentDTO[] }>(`/instruments/search?query=${encodeURIComponent(query)}`);
+  return response.items.map(mapInstrument);
+}
+
+export async function addInstrumentToWatchlist(instrumentUid: string, position: number = 0): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/watchlist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrument_uid: instrumentUid, position }),
+  });
+  if (!response.ok) {
+    throw new Error(`failed to add instrument: ${response.status}`);
+  }
+}
+
+function mapInstrument(dto: InstrumentDTO): InstrumentCard {
+  return {
+    uid: dto.uid,
+    figi: dto.figi,
+    ticker: dto.ticker,
+    classCode: dto.class_code,
+    isin: dto.isin,
+    lot: dto.lot,
+    currency: dto.currency,
+    name: dto.name,
+    exchange: dto.exchange,
+    instrumentType: dto.instrument_type,
+    apiTradeAvailable: dto.api_trade_available,
+    first1MinCandleDate: dto.first_1min_candle_date,
+    first1DayCandleDate: dto.first_1day_candle_date,
+  };
 }

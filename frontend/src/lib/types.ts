@@ -7,6 +7,22 @@ export type AssetDTO = {
   is_active: boolean;
 };
 
+export type InstrumentDTO = {
+  uid: string;
+  figi: string;
+  ticker: string;
+  class_code: string;
+  isin: string;
+  lot: number;
+  currency: string;
+  name: string;
+  exchange: string;
+  instrument_type: string;
+  api_trade_available: boolean;
+  first_1min_candle_date?: string;
+  first_1day_candle_date?: string;
+};
+
 export type SignalDTO = {
   id?: number | string;
   asset_id: string;
@@ -198,6 +214,22 @@ export type AssetCard = {
   venue: string;
   timeframe: string;
   active: boolean;
+};
+
+export type InstrumentCard = {
+  uid: string;
+  figi: string;
+  ticker: string;
+  classCode: string;
+  isin: string;
+  lot: number;
+  currency: string;
+  name: string;
+  exchange: string;
+  instrumentType: string;
+  apiTradeAvailable: boolean;
+  first1MinCandleDate?: string;
+  first1DayCandleDate?: string;
 };
 
 export type SignalCard = {

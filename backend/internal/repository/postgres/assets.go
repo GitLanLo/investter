@@ -18,7 +18,7 @@ func NewAssetRepository(db *sql.DB) *AssetRepository {
 
 func (r *AssetRepository) List(ctx context.Context) ([]domain.Asset, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ticker, name, exchange, timeframe, is_active, created_at, updated_at
+		SELECT id, ticker, name, exchange, timeframe, is_active, figi, instrument_uid, class_code, instrument_type, lot, currency, api_trade_available, first_1min_candle_date, first_1day_candle_date, model_supported, created_at, updated_at
 		FROM assets
 		ORDER BY ticker
 	`)
@@ -37,6 +37,16 @@ func (r *AssetRepository) List(ctx context.Context) ([]domain.Asset, error) {
 			&asset.Exchange,
 			&asset.Timeframe,
 			&asset.IsActive,
+			&asset.Figi,
+			&asset.InstrumentUID,
+			&asset.ClassCode,
+			&asset.InstrumentType,
+			&asset.Lot,
+			&asset.Currency,
+			&asset.APITradeAvailable,
+			&asset.First1MinCandleDate,
+			&asset.First1DayCandleDate,
+			&asset.ModelSupported,
 			&asset.CreatedAt,
 			&asset.UpdatedAt,
 		); err != nil {
@@ -51,7 +61,7 @@ func (r *AssetRepository) List(ctx context.Context) ([]domain.Asset, error) {
 func (r *AssetRepository) GetByID(ctx context.Context, id string) (domain.Asset, error) {
 	var asset domain.Asset
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, ticker, name, exchange, timeframe, is_active, created_at, updated_at
+		SELECT id, ticker, name, exchange, timeframe, is_active, figi, instrument_uid, class_code, instrument_type, lot, currency, api_trade_available, first_1min_candle_date, first_1day_candle_date, model_supported, created_at, updated_at
 		FROM assets
 		WHERE id = $1
 	`, id).Scan(
@@ -61,6 +71,16 @@ func (r *AssetRepository) GetByID(ctx context.Context, id string) (domain.Asset,
 		&asset.Exchange,
 		&asset.Timeframe,
 		&asset.IsActive,
+		&asset.Figi,
+		&asset.InstrumentUID,
+		&asset.ClassCode,
+		&asset.InstrumentType,
+		&asset.Lot,
+		&asset.Currency,
+		&asset.APITradeAvailable,
+		&asset.First1MinCandleDate,
+		&asset.First1DayCandleDate,
+		&asset.ModelSupported,
 		&asset.CreatedAt,
 		&asset.UpdatedAt,
 	)
@@ -76,14 +96,24 @@ func (r *AssetRepository) GetByID(ctx context.Context, id string) (domain.Asset,
 
 func (r *AssetRepository) Upsert(ctx context.Context, asset domain.Asset) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO assets (id, ticker, name, exchange, timeframe, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO assets (id, ticker, name, exchange, timeframe, is_active, figi, instrument_uid, class_code, instrument_type, lot, currency, api_trade_available, first_1min_candle_date, first_1day_candle_date, model_supported)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (id) DO UPDATE
 		SET ticker = EXCLUDED.ticker,
 		    name = EXCLUDED.name,
 		    exchange = EXCLUDED.exchange,
 		    timeframe = EXCLUDED.timeframe,
 		    is_active = EXCLUDED.is_active,
+		    figi = EXCLUDED.figi,
+		    instrument_uid = EXCLUDED.instrument_uid,
+		    class_code = EXCLUDED.class_code,
+		    instrument_type = EXCLUDED.instrument_type,
+		    lot = EXCLUDED.lot,
+		    currency = EXCLUDED.currency,
+		    api_trade_available = EXCLUDED.api_trade_available,
+		    first_1min_candle_date = EXCLUDED.first_1min_candle_date,
+		    first_1day_candle_date = EXCLUDED.first_1day_candle_date,
+		    model_supported = EXCLUDED.model_supported,
 		    updated_at = NOW()
 	`,
 		asset.ID,
@@ -92,6 +122,16 @@ func (r *AssetRepository) Upsert(ctx context.Context, asset domain.Asset) error 
 		asset.Exchange,
 		asset.Timeframe,
 		asset.IsActive,
+		asset.Figi,
+		asset.InstrumentUID,
+		asset.ClassCode,
+		asset.InstrumentType,
+		asset.Lot,
+		asset.Currency,
+		asset.APITradeAvailable,
+		asset.First1MinCandleDate,
+		asset.First1DayCandleDate,
+		asset.ModelSupported,
 	)
 
 	return err

@@ -9,6 +9,7 @@ COPY internal ./internal
 RUN go build -o /out/invest-api ./cmd/api
 
 FROM alpine:3.23
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 COPY --from=build /out/invest-api /usr/local/bin/invest-api

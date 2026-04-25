@@ -23,6 +23,8 @@ type Config struct {
 	OutcomeSchedulerInterval   time.Duration
 	OutcomeSchedulerLimit      int
 	OutcomeSchedulerRunOnStart bool
+	TinkoffInvestToken         string
+	TinkoffInvestTarget        string
 }
 
 func Load() Config {
@@ -43,6 +45,8 @@ func Load() Config {
 		OutcomeSchedulerInterval:   getEnvDuration("OUTCOME_SCHEDULER_INTERVAL", 15*time.Minute),
 		OutcomeSchedulerLimit:      getEnvInt("OUTCOME_SCHEDULER_LIMIT", 1000),
 		OutcomeSchedulerRunOnStart: getEnvBool("OUTCOME_SCHEDULER_RUN_ON_START", false),
+		TinkoffInvestToken:         getEnv("TINKOFF_INVEST_TOKEN", ""),
+		TinkoffInvestTarget:        getEnv("TINKOFF_INVEST_TARGET", "sandbox"),
 	}
 }
 

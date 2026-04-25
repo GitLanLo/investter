@@ -12,6 +12,8 @@ import {
   runOutcomeMaterializationJob,
   runAnalysisForAsset,
   updatePolicyValidationRun,
+  searchInstruments,
+  addInstrumentToWatchlist,
 } from "./lib/api";
 import type {
   ArtifactDocument,
@@ -21,6 +23,7 @@ import type {
   CandidateSnapshot,
   CandleBar,
   FactorPoint,
+  InstrumentCard,
   PolicyOutcomeSummary,
   PolicyOutcomeRecord,
   PolicyValidationRun,
@@ -76,6 +79,7 @@ export function App() {
   const [policyOutcomeJobPending, setPolicyOutcomeJobPending] = useState(false);
   const [policyTransitionPendingId, setPolicyTransitionPendingId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
 
   const deferredAssetId = useDeferredValue(selectedAssetId);
 
@@ -409,6 +413,14 @@ export function App() {
                   <span>{asset.venue}</span>
                 </button>
               ))}
+              <button 
+                className="asset-pill asset-pill-add" 
+                type="button" 
+                onClick={() => setShowSearchPanel(true)}
+              >
+                <strong>+ Search</strong>
+                <span>new instrument</span>
+              </button>
             </div>
 
             {overview?.warnings?.length ? (
@@ -703,6 +715,18 @@ export function App() {
           </div>
         </section>
       </main>
+
+      {showSearchPanel && (
+        <InstrumentSearchPanel
+          onClose={() => setShowSearchPanel(false)}
+          onAdded={async () => {
+            const refreshedShell = await loadWorkspaceShell();
+            startTransition(() => {
+              setShellData(refreshedShell);
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2432,4 +2456,158 @@ function baseName(path: string) {
   const normalized = path.split("\\").join("/");
   const parts = normalized.split("/");
   return parts[parts.length - 1] ?? path;
+}
+
+function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [results, setResults] = useState<InstrumentCard[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<InstrumentCard | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!query || query.length < 2) {
+      setResults([]);
+      setDropdownOpen(false);
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const items = await searchInstruments(query);
+        setResults(items);
+        setDropdownOpen(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Search failed");
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  async function handleAdd() {
+    if (!selected) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await addInstrumentToWatchlist(selected.uid);
+      onAdded();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add to watchlist");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const filtered = typeFilter === "all" ? results : results.filter(r => r.instrumentType === typeFilter);
+
+  return (
+    <div className="search-modal-backdrop" onClick={onClose}>
+      <div className="search-modal-content autocomplete-modal" onClick={e => e.stopPropagation()}>
+        <header className="search-modal-header">
+          <h3>Search Instruments</h3>
+          <button type="button" onClick={onClose} className="search-modal-close">&times;</button>
+        </header>
+        <div className="search-modal-body">
+          <div className="autocomplete-container">
+            <input 
+              type="text" 
+              placeholder="Start typing ticker, figi, or name..." 
+              value={query} 
+              onChange={e => {
+                setQuery(e.target.value);
+                setSelected(null);
+              }} 
+              onFocus={() => { if (results.length > 0) setDropdownOpen(true); }}
+              autoFocus
+              className="autocomplete-input"
+            />
+            {loading && <div className="autocomplete-spinner">Loading...</div>}
+            
+            {dropdownOpen && (
+              <div className="autocomplete-dropdown">
+                {results.length > 0 && (
+                  <div className="autocomplete-filters">
+                    {["all", "share", "future", "currency", "etf"].map(t => (
+                      <label key={t} className="search-filter-label">
+                        <input type="radio" name="typeFilter" checked={typeFilter === t} onChange={() => setTypeFilter(t)} />
+                        {t}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="autocomplete-list">
+                  {filtered.map(r => (
+                    <div 
+                      key={r.uid} 
+                      className="autocomplete-item" 
+                      onClick={() => {
+                        setSelected(r);
+                        setDropdownOpen(false);
+                        setQuery(r.ticker);
+                      }}
+                    >
+                      <div className="autocomplete-item-main">
+                        <strong>{r.ticker}</strong>
+                        <span className="search-result-type">{r.instrumentType}</span>
+                      </div>
+                      <div className="autocomplete-item-sub">{r.name}</div>
+                    </div>
+                  ))}
+                  {filtered.length === 0 && !loading && results.length > 0 && (
+                    <div className="autocomplete-item-empty">No matching instruments for this type.</div>
+                  )}
+                  {results.length === 0 && !loading && query.length >= 2 && (
+                    <div className="autocomplete-item-empty">No instruments found.</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && <p className="console-error">{error}</p>}
+          
+          {selected && (
+            <div className="search-preview">
+              <h4>{selected.ticker}</h4>
+              <p className="search-preview-name">{selected.name}</p>
+              <div className="search-preview-details">
+                <Metric label="Type" value={selected.instrumentType} />
+                <Metric label="Exchange" value={selected.exchange} />
+                <Metric label="Class" value={selected.classCode} />
+                <Metric label="Lot" value={String(selected.lot)} />
+                <Metric label="Currency" value={selected.currency} />
+              </div>
+              
+              <div className="support-status">
+                <p className="eyebrow">Support status</p>
+                <div className="support-badges">
+                  <span className="badge badge-good">watchlist-only</span>
+                  <span className={`badge ${selected.first1MinCandleDate ? 'badge-good' : 'badge-warn'}`}>
+                    {selected.first1MinCandleDate ? "data-loadable" : "no data"}
+                  </span>
+                  <span className="badge badge-warn">model-supported: false</span>
+                  <span className={`badge ${selected.apiTradeAvailable ? 'badge-good' : 'badge-warn'}`}>
+                    {selected.apiTradeAvailable ? "trackable" : "no API trade"}
+                  </span>
+                </div>
+              </div>
+              <div className="search-preview-actions">
+                <button type="button" className="action-button" onClick={handleAdd} disabled={adding}>
+                  {adding ? "Adding..." : "Add to Watchlist"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
