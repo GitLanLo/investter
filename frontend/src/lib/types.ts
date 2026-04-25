@@ -128,6 +128,69 @@ export type PolicyShadowSummaryDTO = {
   last_signal_at?: string;
 };
 
+export type PolicyOutcomeSummaryDTO = {
+  validation_run_id: number;
+  decision_state: string;
+  model_name: string;
+  calibration_method: string;
+  threshold: number;
+  dataset_version: string;
+  signals_total: number;
+  actionable_signals: number;
+  matured_signals: number;
+  pending_signals: number;
+  overdue_pending_signals: number;
+  hit_signals: number;
+  miss_signals: number;
+  realized_precision: number;
+  average_return_pct: number;
+  average_action_return_pct: number;
+  last_signal_at?: string;
+  first_matured_at?: string;
+  last_matured_at?: string;
+  can_promote: boolean;
+  promotion_blockers?: PolicyPromotionBlockerDTO[];
+};
+
+export type PolicyOutcomeRecordDTO = {
+  signal_run_id: number;
+  asset_id: string;
+  as_of_time: string;
+  signal_state: string;
+  signal_direction: string;
+  signal_probability: number;
+  timeframe: string;
+  horizon_bars: number;
+  matured_at: string;
+  entry_price: number;
+  exit_price: number;
+  raw_return_pct: number;
+  action_return_pct: number;
+  is_hit: boolean;
+};
+
+export type PolicyPromotionBlockerDTO = {
+  code: string;
+  message: string;
+};
+
+export type JobRunDTO = {
+  id: number;
+  job_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string;
+  payload: Record<string, unknown>;
+  error_message?: string;
+};
+
+export type JobSchedulerStatusDTO = {
+  enabled: boolean;
+  interval: string;
+  limit: number;
+  run_on_start: boolean;
+};
+
 export type AssetCard = {
   id: string;
   ticker: string;
@@ -294,6 +357,69 @@ export type PolicyShadowSummary = {
   lastSignalAt?: string;
 };
 
+export type PolicyOutcomeSummary = {
+  validationRunId: number;
+  decisionState: string;
+  modelName: string;
+  calibrationMethod: string;
+  threshold: number;
+  datasetVersion: string;
+  signalsTotal: number;
+  actionableSignals: number;
+  maturedSignals: number;
+  pendingSignals: number;
+  overduePendingSignals: number;
+  hitSignals: number;
+  missSignals: number;
+  realizedPrecision: number;
+  averageReturnPct: number;
+  averageActionReturnPct: number;
+  lastSignalAt?: string;
+  firstMaturedAt?: string;
+  lastMaturedAt?: string;
+  canPromote: boolean;
+  promotionBlockers: PolicyPromotionBlocker[];
+};
+
+export type PolicyPromotionBlocker = {
+  code: string;
+  message: string;
+};
+
+export type PolicyOutcomeRecord = {
+  signalRunId: number;
+  assetId: string;
+  asOfTime: string;
+  signalState: string;
+  signalDirection: string;
+  signalProbability: number;
+  timeframe: string;
+  horizonBars: number;
+  maturedAt: string;
+  entryPrice: number;
+  exitPrice: number;
+  rawReturnPct: number;
+  actionReturnPct: number;
+  isHit: boolean;
+};
+
+export type JobRun = {
+  id: number;
+  jobType: string;
+  status: string;
+  startedAt: string;
+  finishedAt?: string;
+  payload: Record<string, unknown>;
+  errorMessage?: string;
+};
+
+export type JobSchedulerStatus = {
+  enabled: boolean;
+  interval: string;
+  limit: number;
+  runOnStart: boolean;
+};
+
 export type ArtifactDocument = {
   key: string;
   title: string;
@@ -309,6 +435,10 @@ export type WorkspaceShellData = {
   productionPolicy: ProductionPolicySnapshot;
   policyValidationRuns: PolicyValidationRun[];
   policyShadowSummary?: PolicyShadowSummary;
+  policyOutcomeSummary?: PolicyOutcomeSummary;
+  policyOutcomeHistory: PolicyOutcomeRecord[];
+  jobScheduler?: JobSchedulerStatus;
+  jobRuns: JobRun[];
   artifactDocuments: ArtifactDocument[];
   generatedFrom: "api" | "mock";
 };

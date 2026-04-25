@@ -398,6 +398,164 @@
 }
 ```
 
+### `GET /ml/policy/outcomes`
+
+- назначение: Sprint 4 forward-validation summary по matured shadow/live signals
+- status: implemented over persisted signals, stored outcomes and available candles
+- query params:
+  - `limit`
+- semantics:
+  - `matured_signals` имеют достаточно будущих свечей для `horizon_bars`;
+  - `pending_signals` ещё ждут завершения горизонта;
+  - `realized_precision` считается по actionable `up/down` сигналам как directional hit-rate;
+  - `average_action_return_pct` учитывает направление сигнала: для `down` прибыльным считается отрицательный raw return.
+- response example:
+
+```json
+{
+  "validation_run_id": 2,
+  "decision_state": "shadow_live",
+  "model_name": "logreg_multiclass",
+  "calibration_method": "identity",
+  "threshold": 0.3,
+  "dataset_version": "mvp_live_20260422",
+  "signals_total": 24,
+  "actionable_signals": 9,
+  "matured_signals": 21,
+  "pending_signals": 3,
+  "overdue_pending_signals": 1,
+  "hit_signals": 5,
+  "miss_signals": 4,
+  "realized_precision": 0.5556,
+  "average_return_pct": 0.0012,
+  "average_action_return_pct": 0.0021,
+  "last_signal_at": "2026-04-24T16:55:00Z",
+  "can_promote": false,
+  "promotion_blockers": [
+    {
+      "code": "pending_signal_horizons",
+      "message": "Some shadow/live signals have not completed their forecast horizon yet."
+    }
+  ],
+  "first_matured_at": "2026-04-22T11:00:00Z",
+  "last_matured_at": "2026-04-23T13:09:00Z"
+}
+```
+
+### `POST /ml/policy/outcomes`
+
+- назначение: вручную materialize все matured outcomes для активного `shadow_live`/`promoted` validation run
+- status: implemented
+- query params:
+  - `limit`
+- response: тот же payload, что и `GET /ml/policy/outcomes`, уже после upsert в `signal_outcomes`
+- notes:
+  - endpoint идемпотентен;
+  - повторный запуск обновляет persisted outcome rows и возвращает актуальный summary.
+
+### `GET /ml/policy/outcomes/history`
+
+- назначение: получить последние matured signal outcomes для active `shadow_live`/`promoted` policy snapshot
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "signal_run_id": 101,
+      "asset_id": "SBER",
+      "as_of_time": "2026-04-24T10:00:00Z",
+      "signal_state": "actionable",
+      "signal_direction": "up",
+      "signal_probability": 0.71,
+      "timeframe": "5m",
+      "horizon_bars": 12,
+      "matured_at": "2026-04-24T11:00:00Z",
+      "entry_price": 301.5,
+      "exit_price": 303.0,
+      "raw_return_pct": 0.00497,
+      "action_return_pct": 0.00497,
+      "is_hit": true
+    }
+  ]
+}
+```
+
+### `POST /jobs/outcomes/materialize`
+
+- назначение: запустить materialization matured outcomes как tracked backend job
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "id": 7,
+  "job_type": "outcomes_materialize",
+  "status": "succeeded",
+  "started_at": "2026-04-24T17:00:00Z",
+  "finished_at": "2026-04-24T17:00:02Z",
+  "payload": {
+    "limit": 1000,
+    "validation_run_id": 2,
+    "matured_signals": 21,
+    "pending_signals": 3,
+    "overdue_pending_signals": 1,
+    "can_promote": false,
+    "promotion_blocker_count": 1
+  }
+}
+```
+
+### `GET /jobs/runs`
+
+- назначение: получить последние job runs backend services
+- status: implemented
+- query params:
+  - `limit`
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "id": 7,
+      "job_type": "outcomes_materialize",
+      "status": "succeeded",
+      "started_at": "2026-04-24T17:00:00Z",
+      "finished_at": "2026-04-24T17:00:02Z",
+      "payload": {
+        "limit": 1000,
+        "validation_run_id": 2,
+        "matured_signals": 21,
+        "pending_signals": 3,
+        "overdue_pending_signals": 1,
+        "can_promote": false
+      }
+    }
+  ]
+}
+```
+
+### `GET /jobs/scheduler`
+
+- назначение: получить effective status/config recurring scheduler для outcome materialization
+- status: implemented
+- response example:
+
+```json
+{
+  "enabled": true,
+  "interval": "15m0s",
+  "limit": 1000,
+  "run_on_start": true
+}
+```
+
 ### `GET /watchlist`
 
 - назначение: список наблюдаемых инструментов

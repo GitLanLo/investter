@@ -39,6 +39,13 @@ func TestMigrateAppliesPendingMigration(t *testing.T) {
 		WithArgs("003_signal_policy_snapshot", "signal_policy_snapshot").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec("(?s)CREATE TABLE IF NOT EXISTS signal_outcomes.*CREATE INDEX IF NOT EXISTS idx_signal_outcomes_matured_at").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO schema_migrations").
+		WithArgs("004_signal_outcomes", "signal_outcomes").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	if err := Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -61,7 +68,8 @@ func TestMigrateSkipsAppliedMigration(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).
 			AddRow("001_init").
 			AddRow("002_policy_validation_runs").
-			AddRow("003_signal_policy_snapshot"))
+			AddRow("003_signal_policy_snapshot").
+			AddRow("004_signal_outcomes"))
 
 	if err := Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)

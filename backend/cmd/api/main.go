@@ -14,11 +14,15 @@ import (
 	"invest/backend/internal/app"
 	"invest/backend/internal/config"
 	"invest/backend/internal/httpserver"
+	"invest/backend/internal/service"
 	"invest/backend/internal/storage"
 )
 
 func main() {
 	cfg := config.Load()
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	db, err := storage.Open(cfg)
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
@@ -39,6 +43,15 @@ func main() {
 	); err != nil {
 		log.Fatalf("bootstrap model init failed: %v", err)
 	}
+	if cfg.OutcomeSchedulerEnabled {
+		service.NewOutcomeMaterializationScheduler(
+			container.Services.Jobs,
+			cfg.OutcomeSchedulerInterval,
+			cfg.OutcomeSchedulerLimit,
+			cfg.OutcomeSchedulerRunOnStart,
+			log.Default(),
+		).Start(rootCtx)
+	}
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddress(),
@@ -56,9 +69,7 @@ func main() {
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	<-rootCtx.Done()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

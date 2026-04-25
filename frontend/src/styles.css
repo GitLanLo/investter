@@ -1355,6 +1355,11 @@ a {
   color: var(--muted);
 }
 
+.policy-blocker-list {
+  display: grid;
+  gap: 6px;
+}
+
 .shadow-summary-card {
   display: grid;
   gap: 12px;
@@ -1418,6 +1423,52 @@ a {
 .policy-run-action:disabled {
   cursor: default;
   opacity: 0.48;
+}
+
+.policy-job-list {
+  display: grid;
+  gap: 10px;
+}
+
+.policy-job-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(22, 32, 43, 0.08);
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.policy-job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.policy-outcome-list {
+  display: grid;
+  gap: 10px;
+}
+
+.policy-outcome-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(22, 32, 43, 0.08);
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.policy-outcome-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .policy-run-metrics {

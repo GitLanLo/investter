@@ -228,6 +228,77 @@ type mlPolicyShadowSummaryDTO struct {
 	LastSignalAt      string  `json:"last_signal_at,omitempty"`
 }
 
+type mlPolicyOutcomeHistoryResponse struct {
+	Items []mlPolicyOutcomeRecordDTO `json:"items"`
+}
+
+type mlPolicyOutcomeSummaryDTO struct {
+	ValidationRunID        int64                         `json:"validation_run_id"`
+	DecisionState          string                        `json:"decision_state"`
+	ModelName              string                        `json:"model_name"`
+	CalibrationMethod      string                        `json:"calibration_method"`
+	Threshold              float64                       `json:"threshold"`
+	DatasetVersion         string                        `json:"dataset_version"`
+	SignalsTotal           int                           `json:"signals_total"`
+	ActionableSignals      int                           `json:"actionable_signals"`
+	MaturedSignals         int                           `json:"matured_signals"`
+	PendingSignals         int                           `json:"pending_signals"`
+	OverduePendingSignals  int                           `json:"overdue_pending_signals"`
+	HitSignals             int                           `json:"hit_signals"`
+	MissSignals            int                           `json:"miss_signals"`
+	RealizedPrecision      float64                       `json:"realized_precision"`
+	AverageReturnPct       float64                       `json:"average_return_pct"`
+	AverageActionReturnPct float64                       `json:"average_action_return_pct"`
+	LastSignalAt           string                        `json:"last_signal_at,omitempty"`
+	FirstMaturedAt         string                        `json:"first_matured_at,omitempty"`
+	LastMaturedAt          string                        `json:"last_matured_at,omitempty"`
+	CanPromote             bool                          `json:"can_promote"`
+	PromotionBlockers      []mlPolicyPromotionBlockerDTO `json:"promotion_blockers,omitempty"`
+}
+
+type mlPolicyOutcomeRecordDTO struct {
+	SignalRunID       int64   `json:"signal_run_id"`
+	AssetID           string  `json:"asset_id"`
+	AsOfTime          string  `json:"as_of_time"`
+	SignalState       string  `json:"signal_state"`
+	SignalDirection   string  `json:"signal_direction"`
+	SignalProbability float64 `json:"signal_probability"`
+	Timeframe         string  `json:"timeframe"`
+	HorizonBars       int     `json:"horizon_bars"`
+	MaturedAt         string  `json:"matured_at"`
+	EntryPrice        float64 `json:"entry_price"`
+	ExitPrice         float64 `json:"exit_price"`
+	RawReturnPct      float64 `json:"raw_return_pct"`
+	ActionReturnPct   float64 `json:"action_return_pct"`
+	IsHit             bool    `json:"is_hit"`
+}
+
+type mlPolicyPromotionBlockerDTO struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type jobRunsResponse struct {
+	Items []jobRunDTO `json:"items"`
+}
+
+type jobSchedulerStatusDTO struct {
+	Enabled    bool   `json:"enabled"`
+	Interval   string `json:"interval"`
+	Limit      int    `json:"limit"`
+	RunOnStart bool   `json:"run_on_start"`
+}
+
+type jobRunDTO struct {
+	ID           int64          `json:"id"`
+	JobType      string         `json:"job_type"`
+	Status       string         `json:"status"`
+	StartedAt    string         `json:"started_at"`
+	FinishedAt   string         `json:"finished_at,omitempty"`
+	Payload      map[string]any `json:"payload"`
+	ErrorMessage string         `json:"error_message,omitempty"`
+}
+
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 
@@ -793,6 +864,175 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		writeJSON(w, http.StatusOK, toPolicyShadowSummaryDTO(summary))
 	})
 
+	mux.HandleFunc("/ml/policy/outcomes", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Policy == nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", "policy validation service is not configured", nil)
+			return
+		}
+
+		limit := 1000
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			summary, err := deps.Container.Services.Policy.LoadOutcomeSummary(r.Context(), limit)
+			if err != nil {
+				switch {
+				case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+					writeError(w, http.StatusNotFound, "policy_validation_run_not_found", err.Error(), nil)
+				case errors.Is(err, service.ErrPolicyValidationUnavailable):
+					writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", err.Error(), nil)
+				default:
+					writeError(w, http.StatusInternalServerError, "policy_outcomes_failed", err.Error(), nil)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, toPolicyOutcomeSummaryDTO(summary))
+		case http.MethodPost:
+			summary, err := deps.Container.Services.Policy.MaterializeOutcomes(r.Context(), limit)
+			if err != nil {
+				switch {
+				case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+					writeError(w, http.StatusNotFound, "policy_validation_run_not_found", err.Error(), nil)
+				case errors.Is(err, service.ErrPolicyValidationUnavailable):
+					writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", err.Error(), nil)
+				default:
+					writeError(w, http.StatusInternalServerError, "policy_outcomes_materialize_failed", err.Error(), nil)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, toPolicyOutcomeSummaryDTO(summary))
+		default:
+			writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+		}
+	})
+
+	mux.HandleFunc("/ml/policy/outcomes/history", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Policy == nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", "policy validation service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		limit := 100
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+
+		items, err := deps.Container.Services.Policy.LoadOutcomeHistory(r.Context(), limit)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+				writeError(w, http.StatusNotFound, "policy_validation_run_not_found", err.Error(), nil)
+			case errors.Is(err, service.ErrPolicyValidationUnavailable):
+				writeError(w, http.StatusServiceUnavailable, "policy_validation_unavailable", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "policy_outcome_history_failed", err.Error(), nil)
+			}
+			return
+		}
+
+		out := mlPolicyOutcomeHistoryResponse{Items: make([]mlPolicyOutcomeRecordDTO, 0, len(items))}
+		for _, item := range items {
+			out.Items = append(out.Items, toPolicyOutcomeRecordDTO(item))
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/jobs/runs", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Jobs == nil {
+			writeError(w, http.StatusServiceUnavailable, "jobs_unavailable", "jobs service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		limit := 20
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+		items, err := deps.Container.Services.Jobs.ListLatest(r.Context(), limit)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrJobsUnavailable):
+				writeError(w, http.StatusServiceUnavailable, "jobs_unavailable", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "jobs_list_failed", err.Error(), nil)
+			}
+			return
+		}
+		out := jobRunsResponse{Items: make([]jobRunDTO, 0, len(items))}
+		for _, item := range items {
+			out.Items = append(out.Items, toJobRunDTO(item))
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/jobs/scheduler", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		writeJSON(w, http.StatusOK, jobSchedulerStatusDTO{
+			Enabled:    cfg.OutcomeSchedulerEnabled,
+			Interval:   cfg.OutcomeSchedulerInterval.String(),
+			Limit:      cfg.OutcomeSchedulerLimit,
+			RunOnStart: cfg.OutcomeSchedulerRunOnStart,
+		})
+	})
+
+	mux.HandleFunc("/jobs/outcomes/materialize", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Jobs == nil {
+			writeError(w, http.StatusServiceUnavailable, "jobs_unavailable", "jobs service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		limit := 1000
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+		item, err := deps.Container.Services.Jobs.RunOutcomeMaterialization(r.Context(), limit)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrJobsUnavailable):
+				writeError(w, http.StatusServiceUnavailable, "jobs_unavailable", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "outcome_job_failed", err.Error(), nil)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, toJobRunDTO(item))
+	})
+
 	return loggingMiddleware(corsMiddleware(mux))
 }
 
@@ -962,6 +1202,83 @@ func toPolicyShadowSummaryDTO(summary domain.PolicyShadowSummary) mlPolicyShadow
 	}
 	if !summary.LastSignalAt.IsZero() {
 		out.LastSignalAt = summary.LastSignalAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+func toPolicyOutcomeSummaryDTO(summary domain.PolicyOutcomeSummary) mlPolicyOutcomeSummaryDTO {
+	out := mlPolicyOutcomeSummaryDTO{
+		ValidationRunID:        summary.ValidationRunID,
+		DecisionState:          summary.DecisionState,
+		ModelName:              summary.ModelName,
+		CalibrationMethod:      summary.CalibrationMethod,
+		Threshold:              summary.Threshold,
+		DatasetVersion:         summary.DatasetVersion,
+		SignalsTotal:           summary.SignalsTotal,
+		ActionableSignals:      summary.ActionableSignals,
+		MaturedSignals:         summary.MaturedSignals,
+		PendingSignals:         summary.PendingSignals,
+		OverduePendingSignals:  summary.OverduePendingSignals,
+		HitSignals:             summary.HitSignals,
+		MissSignals:            summary.MissSignals,
+		RealizedPrecision:      summary.RealizedPrecision,
+		AverageReturnPct:       summary.AverageReturnPct,
+		AverageActionReturnPct: summary.AverageActionReturnPct,
+		CanPromote:             summary.CanPromote,
+	}
+	if len(summary.PromotionBlockers) > 0 {
+		out.PromotionBlockers = make([]mlPolicyPromotionBlockerDTO, 0, len(summary.PromotionBlockers))
+		for _, blocker := range summary.PromotionBlockers {
+			out.PromotionBlockers = append(out.PromotionBlockers, mlPolicyPromotionBlockerDTO{
+				Code:    blocker.Code,
+				Message: blocker.Message,
+			})
+		}
+	}
+	if !summary.FirstMaturedAt.IsZero() {
+		out.FirstMaturedAt = summary.FirstMaturedAt.UTC().Format(time.RFC3339)
+	}
+	if !summary.LastMaturedAt.IsZero() {
+		out.LastMaturedAt = summary.LastMaturedAt.UTC().Format(time.RFC3339)
+	}
+	if !summary.LastSignalAt.IsZero() {
+		out.LastSignalAt = summary.LastSignalAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+func toPolicyOutcomeRecordDTO(item domain.PolicyOutcomeRecord) mlPolicyOutcomeRecordDTO {
+	return mlPolicyOutcomeRecordDTO{
+		SignalRunID:       item.SignalRunID,
+		AssetID:           item.AssetID,
+		AsOfTime:          item.AsOfTime.UTC().Format(time.RFC3339),
+		SignalState:       item.SignalState,
+		SignalDirection:   item.SignalDirection,
+		SignalProbability: item.SignalProbability,
+		Timeframe:         item.Timeframe,
+		HorizonBars:       item.HorizonBars,
+		MaturedAt:         item.MaturedAt.UTC().Format(time.RFC3339),
+		EntryPrice:        item.EntryPrice,
+		ExitPrice:         item.ExitPrice,
+		RawReturnPct:      item.RawReturnPct,
+		ActionReturnPct:   item.ActionReturnPct,
+		IsHit:             item.IsHit,
+	}
+}
+
+func toJobRunDTO(item domain.JobRun) jobRunDTO {
+	out := jobRunDTO{
+		ID:        item.ID,
+		JobType:   item.JobType,
+		Status:    item.Status,
+		StartedAt: item.StartedAt.UTC().Format(time.RFC3339),
+		Payload:   item.Payload,
+	}
+	if !item.FinishedAt.IsZero() {
+		out.FinishedAt = item.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	if item.ErrorMessage != "" {
+		out.ErrorMessage = item.ErrorMessage
 	}
 	return out
 }

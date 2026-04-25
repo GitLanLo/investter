@@ -13,6 +13,14 @@ import type {
   FactorPoint,
   MLOverview,
   ArtifactDocument,
+  PolicyOutcomeSummary,
+  PolicyOutcomeSummaryDTO,
+  JobRun,
+  JobRunDTO,
+  JobSchedulerStatus,
+  JobSchedulerStatusDTO,
+  PolicyOutcomeRecord,
+  PolicyOutcomeRecordDTO,
   PolicyValidationRun,
   PolicyValidationRunDTO,
   PolicyShadowSummary,
@@ -54,9 +62,13 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
       fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
     ]);
-    const [validationRuns, shadowSummary] = await Promise.all([
+    const [validationRuns, shadowSummary, outcomeSummary, outcomeHistory, jobs, scheduler] = await Promise.all([
       fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
       fetchJson<PolicyShadowSummaryDTO>("/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
+      fetchJson<PolicyOutcomeSummaryDTO>("/ml/policy/outcomes?limit=1000").catch(() => undefined),
+      fetchJson<{ items: PolicyOutcomeRecordDTO[] }>("/ml/policy/outcomes/history?limit=12").catch(() => ({ items: [] })),
+      fetchJson<{ items: JobRunDTO[] }>("/jobs/runs?limit=6").catch(() => ({ items: [] })),
+      fetchJson<JobSchedulerStatusDTO>("/jobs/scheduler").catch(() => undefined),
     ]);
 
     return {
@@ -67,6 +79,10 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       productionPolicy: mapProductionPolicy(productionPolicy),
       policyValidationRuns: validationRuns.items.map(mapPolicyValidationRun),
       policyShadowSummary: shadowSummary ? mapPolicyShadowSummary(shadowSummary) : undefined,
+      policyOutcomeSummary: outcomeSummary ? mapPolicyOutcomeSummary(outcomeSummary) : undefined,
+      policyOutcomeHistory: outcomeHistory.items.map(mapPolicyOutcomeRecord),
+      jobScheduler: scheduler ? mapJobSchedulerStatus(scheduler) : undefined,
+      jobRuns: jobs.items.map(mapJobRun),
       artifactDocuments: documents.items.map(mapResearchDocument),
     };
   } catch {
@@ -177,6 +193,18 @@ export async function updatePolicyValidationRun(
   }
 
   return mapPolicyValidationRun((await response.json()) as PolicyValidationRunDTO);
+}
+
+export async function runOutcomeMaterializationJob(): Promise<JobRun> {
+  const response = await fetch(`${apiBaseUrl}/jobs/outcomes/materialize?limit=1000`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`outcome job failed: ${response.status}`);
+  }
+
+  return mapJobRun((await response.json()) as JobRunDTO);
 }
 
 function mapAsset(dto: AssetDTO): AssetCard {
@@ -316,6 +344,75 @@ function mapPolicyShadowSummary(dto: PolicyShadowSummaryDTO): PolicyShadowSummar
     observedCoverage: dto.observed_coverage,
     firstSignalAt: dto.first_signal_at,
     lastSignalAt: dto.last_signal_at,
+  };
+}
+
+function mapPolicyOutcomeSummary(dto: PolicyOutcomeSummaryDTO): PolicyOutcomeSummary {
+  return {
+    validationRunId: dto.validation_run_id,
+    decisionState: dto.decision_state,
+    modelName: dto.model_name,
+    calibrationMethod: dto.calibration_method,
+    threshold: dto.threshold,
+    datasetVersion: dto.dataset_version,
+    signalsTotal: dto.signals_total,
+    actionableSignals: dto.actionable_signals,
+    maturedSignals: dto.matured_signals,
+    pendingSignals: dto.pending_signals,
+    overduePendingSignals: dto.overdue_pending_signals,
+    hitSignals: dto.hit_signals,
+    missSignals: dto.miss_signals,
+    realizedPrecision: dto.realized_precision,
+    averageReturnPct: dto.average_return_pct,
+    averageActionReturnPct: dto.average_action_return_pct,
+    lastSignalAt: dto.last_signal_at,
+    firstMaturedAt: dto.first_matured_at,
+    lastMaturedAt: dto.last_matured_at,
+    canPromote: dto.can_promote,
+    promotionBlockers: (dto.promotion_blockers ?? []).map((item) => ({
+      code: item.code,
+      message: item.message,
+    })),
+  };
+}
+
+function mapPolicyOutcomeRecord(dto: PolicyOutcomeRecordDTO): PolicyOutcomeRecord {
+  return {
+    signalRunId: dto.signal_run_id,
+    assetId: dto.asset_id,
+    asOfTime: dto.as_of_time,
+    signalState: dto.signal_state,
+    signalDirection: dto.signal_direction,
+    signalProbability: dto.signal_probability,
+    timeframe: dto.timeframe,
+    horizonBars: dto.horizon_bars,
+    maturedAt: dto.matured_at,
+    entryPrice: dto.entry_price,
+    exitPrice: dto.exit_price,
+    rawReturnPct: dto.raw_return_pct,
+    actionReturnPct: dto.action_return_pct,
+    isHit: dto.is_hit,
+  };
+}
+
+function mapJobRun(dto: JobRunDTO): JobRun {
+  return {
+    id: dto.id,
+    jobType: dto.job_type,
+    status: dto.status,
+    startedAt: dto.started_at,
+    finishedAt: dto.finished_at,
+    payload: dto.payload,
+    errorMessage: dto.error_message,
+  };
+}
+
+function mapJobSchedulerStatus(dto: JobSchedulerStatusDTO): JobSchedulerStatus {
+  return {
+    enabled: dto.enabled,
+    interval: dto.interval,
+    limit: dto.limit,
+    runOnStart: dto.run_on_start,
   };
 }
 

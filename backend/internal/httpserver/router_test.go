@@ -43,7 +43,11 @@ func TestAnalysisEndpoints(t *testing.T) {
 	}
 	signalRepo := &testSignalRepo{}
 
-	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
@@ -168,7 +172,11 @@ func TestMarketDataEndpoints(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
@@ -281,7 +289,11 @@ func TestResearchOverviewEndpoint(t *testing.T) {
 		},
 	})
 
-	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
@@ -348,7 +360,11 @@ func TestResearchDocumentsEndpoint(t *testing.T) {
 	})
 	writeTextFile(t, filepath.Join(researchRoot, "calibration_run", "report.md"), "# Calibration report\n\nPlatt wins.")
 
-	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
@@ -478,6 +494,9 @@ func TestProductionPolicyEndpoint(t *testing.T) {
 }
 
 func TestPolicyValidationRunsEndpoint(t *testing.T) {
+	restoreNow := service.SetPolicyValidationNowForTest(mustTime(t, "2026-04-24T10:30:00Z"))
+	defer restoreNow()
+
 	dataRoot := t.TempDir()
 	researchRoot := t.TempDir()
 
@@ -538,15 +557,38 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 
 	policyRepo := &testPolicyValidationRepo{}
 	signalRepo := &testSignalRepo{}
-	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+	outcomeRepo := &testSignalOutcomeRepo{}
+	jobRepo := &testJobRunRepo{}
+	assetRepo := &testAssetRepo{
+		assets: map[string]domain.Asset{
+			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m", IsActive: true},
+		},
+	}
+	marketRepo := &testMarketDataRepo{
+		candles: map[string][]domain.Candle{
+			"SBER": {
+				{Timestamp: mustTime(t, "2026-04-22T10:00:00Z"), Close: 100, Ticker: "SBER", Timeframe: "5m"},
+				{Timestamp: mustTime(t, "2026-04-22T10:05:00Z"), Close: 101, Ticker: "SBER", Timeframe: "5m"},
+				{Timestamp: mustTime(t, "2026-04-22T10:10:00Z"), Close: 102, Ticker: "SBER", Timeframe: "5m"},
+				{Timestamp: mustTime(t, "2026-04-22T10:15:00Z"), Close: 103, Ticker: "SBER", Timeframe: "5m"},
+			},
+		},
+	}
+	policyService := service.NewPolicyValidationService(
+		policyRepo,
+		service.NewResearchArtifactsService(dataRoot, researchRoot),
+		signalRepo,
+	).WithOutcomeData(assetRepo, marketRepo, outcomeRepo)
+	router := NewRouter(config.Config{
+		AppEnv:                   "test",
+		OutcomeSchedulerInterval: 15 * time.Minute,
+		OutcomeSchedulerLimit:    1000,
+	}, Dependencies{
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
-				Policy: service.NewPolicyValidationService(
-					policyRepo,
-					service.NewResearchArtifactsService(dataRoot, researchRoot),
-					signalRepo,
-				),
+				Policy: policyService,
+				Jobs:   service.NewJobService(jobRepo, policyService),
 			},
 		},
 	})
@@ -624,7 +666,31 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		},
 		Threshold:   0.65,
 		Timeframe:   "5m",
-		HorizonBars: 12,
+		HorizonBars: 2,
+		Policy: &domain.SignalPolicySnapshot{
+			PolicyStatus:      "production_candidate",
+			ModelName:         "rf_multiclass",
+			ScenarioName:      "core_price_volume_only",
+			CalibrationMethod: "platt",
+			Threshold:         0.30,
+			DatasetVersion:    "test_live",
+		},
+	})
+	_, _ = signalRepo.Create(context.Background(), domain.SignalRun{
+		AssetID:           "SBER",
+		ModelVersion:      "baseline_stub_v1",
+		AsOfTime:          mustTime(t, "2026-04-22T10:10:00Z"),
+		SignalState:       domain.SignalStateActionable,
+		SignalDirection:   domain.SignalDirectionDown,
+		SignalProbability: 0.68,
+		ClassProbabilities: domain.SignalClassProbabilities{
+			Up:      0.14,
+			Down:    0.68,
+			NoTrade: 0.18,
+		},
+		Threshold:   0.65,
+		Timeframe:   "5m",
+		HorizonBars: 2,
 		Policy: &domain.SignalPolicySnapshot{
 			PolicyStatus:      "production_candidate",
 			ModelName:         "rf_multiclass",
@@ -647,8 +713,121 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 	if err := json.Unmarshal(shadowResp.Body.Bytes(), &shadow); err != nil {
 		t.Fatalf("decode policy shadow summary: %v", err)
 	}
-	if shadow.ValidationRunID != 1 || shadow.SignalsTotal != 1 || shadow.ActionableSignals != 1 {
+	if shadow.ValidationRunID != 1 || shadow.SignalsTotal != 2 || shadow.ActionableSignals != 2 {
 		t.Fatalf("unexpected shadow summary: %+v", shadow)
+	}
+
+	outcomeMaterializeReq := httptest.NewRequest(http.MethodPost, "/ml/policy/outcomes?limit=10", nil)
+	outcomeMaterializeResp := httptest.NewRecorder()
+	router.ServeHTTP(outcomeMaterializeResp, outcomeMaterializeReq)
+
+	if outcomeMaterializeResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for POST /ml/policy/outcomes: %d body=%s", outcomeMaterializeResp.Code, outcomeMaterializeResp.Body.String())
+	}
+
+	if len(outcomeRepo.items) != 1 {
+		t.Fatalf("expected 1 persisted outcome, got %d", len(outcomeRepo.items))
+	}
+
+	outcomeReq := httptest.NewRequest(http.MethodGet, "/ml/policy/outcomes", nil)
+	outcomeResp := httptest.NewRecorder()
+	router.ServeHTTP(outcomeResp, outcomeReq)
+
+	if outcomeResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/policy/outcomes: %d body=%s", outcomeResp.Code, outcomeResp.Body.String())
+	}
+
+	var outcomes mlPolicyOutcomeSummaryDTO
+	if err := json.Unmarshal(outcomeResp.Body.Bytes(), &outcomes); err != nil {
+		t.Fatalf("decode policy outcomes: %v", err)
+	}
+	if outcomes.ValidationRunID != 1 || outcomes.MaturedSignals != 1 || outcomes.PendingSignals != 1 {
+		t.Fatalf("unexpected outcome maturity summary: %+v", outcomes)
+	}
+	if outcomes.OverduePendingSignals != 1 {
+		t.Fatalf("expected one overdue pending outcome, got %+v", outcomes)
+	}
+	if outcomes.HitSignals != 1 || outcomes.MissSignals != 0 || outcomes.RealizedPrecision != 1 {
+		t.Fatalf("unexpected realized precision summary: %+v", outcomes)
+	}
+	if outcomes.CanPromote {
+		t.Fatalf("expected promote to stay blocked, got %+v", outcomes)
+	}
+	if len(outcomes.PromotionBlockers) == 0 {
+		t.Fatalf("expected promotion blockers, got %+v", outcomes)
+	}
+	if outcomes.LastSignalAt != "2026-04-22T10:10:00Z" {
+		t.Fatalf("unexpected last signal timestamp: %+v", outcomes)
+	}
+	if outcomes.AverageActionReturnPct <= 0 {
+		t.Fatalf("expected positive action return, got %+v", outcomes)
+	}
+
+	outcomeHistoryReq := httptest.NewRequest(http.MethodGet, "/ml/policy/outcomes/history?limit=10", nil)
+	outcomeHistoryResp := httptest.NewRecorder()
+	router.ServeHTTP(outcomeHistoryResp, outcomeHistoryReq)
+
+	if outcomeHistoryResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /ml/policy/outcomes/history: %d body=%s", outcomeHistoryResp.Code, outcomeHistoryResp.Body.String())
+	}
+
+	var history mlPolicyOutcomeHistoryResponse
+	if err := json.Unmarshal(outcomeHistoryResp.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode policy outcome history: %v", err)
+	}
+	if len(history.Items) != 1 {
+		t.Fatalf("expected 1 outcome history item, got %+v", history)
+	}
+	if history.Items[0].SignalDirection != domain.SignalDirectionUp || history.Items[0].AssetID != "SBER" {
+		t.Fatalf("unexpected outcome history item: %+v", history.Items[0])
+	}
+
+	jobReq := httptest.NewRequest(http.MethodPost, "/jobs/outcomes/materialize?limit=10", nil)
+	jobResp := httptest.NewRecorder()
+	router.ServeHTTP(jobResp, jobReq)
+
+	if jobResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for POST /jobs/outcomes/materialize: %d body=%s", jobResp.Code, jobResp.Body.String())
+	}
+
+	var job jobRunDTO
+	if err := json.Unmarshal(jobResp.Body.Bytes(), &job); err != nil {
+		t.Fatalf("decode job run response: %v", err)
+	}
+	if job.JobType != service.JobTypeOutcomesMaterialize || job.Status != domain.JobStatusSucceeded {
+		t.Fatalf("unexpected job run payload: %+v", job)
+	}
+
+	jobsListReq := httptest.NewRequest(http.MethodGet, "/jobs/runs?limit=5", nil)
+	jobsListResp := httptest.NewRecorder()
+	router.ServeHTTP(jobsListResp, jobsListReq)
+
+	if jobsListResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /jobs/runs: %d body=%s", jobsListResp.Code, jobsListResp.Body.String())
+	}
+
+	var jobs jobRunsResponse
+	if err := json.Unmarshal(jobsListResp.Body.Bytes(), &jobs); err != nil {
+		t.Fatalf("decode jobs list: %v", err)
+	}
+	if len(jobs.Items) == 0 || jobs.Items[0].JobType != service.JobTypeOutcomesMaterialize {
+		t.Fatalf("unexpected jobs list payload: %+v", jobs)
+	}
+
+	schedulerReq := httptest.NewRequest(http.MethodGet, "/jobs/scheduler", nil)
+	schedulerResp := httptest.NewRecorder()
+	router.ServeHTTP(schedulerResp, schedulerReq)
+
+	if schedulerResp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /jobs/scheduler: %d body=%s", schedulerResp.Code, schedulerResp.Body.String())
+	}
+
+	var scheduler jobSchedulerStatusDTO
+	if err := json.Unmarshal(schedulerResp.Body.Bytes(), &scheduler); err != nil {
+		t.Fatalf("decode scheduler status: %v", err)
+	}
+	if scheduler.Enabled || scheduler.Interval != "15m0s" || scheduler.Limit != 1000 || scheduler.RunOnStart {
+		t.Fatalf("unexpected scheduler payload: %+v", scheduler)
 	}
 }
 
@@ -838,6 +1017,113 @@ type testPolicyValidationRepo struct {
 	items []domain.PolicyValidationRun
 }
 
+type testMarketDataRepo struct {
+	candles map[string][]domain.Candle
+	factors []domain.FactorBar
+}
+
+type testSignalOutcomeRepo struct {
+	items map[int64]domain.SignalOutcome
+}
+
+type testJobRunRepo struct {
+	items []domain.JobRun
+}
+
+func (r *testMarketDataRepo) ListCandles(
+	_ context.Context,
+	ticker string,
+	_ string,
+	from time.Time,
+	to time.Time,
+	limit int,
+) ([]domain.Candle, error) {
+	items := make([]domain.Candle, 0, len(r.candles[ticker]))
+	for _, candle := range r.candles[ticker] {
+		if candle.Timestamp.Before(from) || candle.Timestamp.After(to) {
+			continue
+		}
+		items = append(items, candle)
+		if limit > 0 && len(items) == limit {
+			break
+		}
+	}
+	return items, nil
+}
+
+func (r *testMarketDataRepo) ListFactors(context.Context, string, time.Time, time.Time) ([]domain.FactorBar, error) {
+	return r.factors, nil
+}
+
+func (r *testSignalOutcomeRepo) Upsert(_ context.Context, outcome domain.SignalOutcome) (domain.SignalOutcome, error) {
+	if r.items == nil {
+		r.items = map[int64]domain.SignalOutcome{}
+	}
+	if existing, ok := r.items[outcome.SignalRunID]; ok {
+		outcome.ID = existing.ID
+		outcome.CreatedAt = existing.CreatedAt
+		outcome.UpdatedAt = time.Now().UTC()
+		r.items[outcome.SignalRunID] = outcome
+		return outcome, nil
+	}
+	outcome.ID = int64(len(r.items) + 1)
+	outcome.CreatedAt = time.Now().UTC()
+	outcome.UpdatedAt = outcome.CreatedAt
+	r.items[outcome.SignalRunID] = outcome
+	return outcome, nil
+}
+
+func (r *testSignalOutcomeRepo) ListByPolicySnapshot(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	limit int,
+) ([]domain.SignalOutcome, error) {
+	items := make([]domain.SignalOutcome, 0, len(r.items))
+	for _, item := range r.items {
+		items = append(items, item)
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (r *testJobRunRepo) Create(_ context.Context, run domain.JobRun) (domain.JobRun, error) {
+	run.ID = int64(len(r.items) + 1)
+	run.StartedAt = time.Now().UTC()
+	if run.Payload == nil {
+		run.Payload = map[string]any{}
+	}
+	r.items = append(r.items, run)
+	return run, nil
+}
+
+func (r *testJobRunRepo) Finish(_ context.Context, id int64, status string, payload map[string]any, errorMessage string) (domain.JobRun, error) {
+	for index := range r.items {
+		if r.items[index].ID == id {
+			r.items[index].Status = status
+			r.items[index].Payload = payload
+			r.items[index].ErrorMessage = errorMessage
+			r.items[index].FinishedAt = time.Now().UTC()
+			return r.items[index], nil
+		}
+	}
+	return domain.JobRun{}, sql.ErrNoRows
+}
+
+func (r *testJobRunRepo) ListLatest(_ context.Context, limit int) ([]domain.JobRun, error) {
+	if limit > len(r.items) {
+		limit = len(r.items)
+	}
+	out := make([]domain.JobRun, 0, limit)
+	for i := len(r.items) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, r.items[i])
+	}
+	return out, nil
+}
+
 func (r *testPolicyValidationRepo) Create(_ context.Context, run domain.PolicyValidationRun) (domain.PolicyValidationRun, error) {
 	run.ID = int64(len(r.items) + 1)
 	run.CreatedAt = time.Now().UTC()
@@ -876,7 +1162,10 @@ var _ repository.AssetRepository = (*testAssetRepo)(nil)
 var _ repository.WatchlistRepository = (*testWatchlistRepo)(nil)
 var _ repository.ModelRegistryRepository = (*testModelRepo)(nil)
 var _ repository.SignalRunRepository = (*testSignalRepo)(nil)
+var _ repository.SignalOutcomeRepository = (*testSignalOutcomeRepo)(nil)
+var _ repository.JobRunRepository = (*testJobRunRepo)(nil)
 var _ repository.PolicyValidationRunRepository = (*testPolicyValidationRepo)(nil)
+var _ repository.MarketDataRepository = (*testMarketDataRepo)(nil)
 
 func writeTestManifest(t *testing.T) string {
 	t.Helper()

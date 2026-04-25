@@ -12,6 +12,7 @@ type Services struct {
 	Analysis   *AnalysisService
 	Research   *ResearchArtifactsService
 	Policy     *PolicyValidationService
+	Jobs       *JobService
 }
 
 func NewServices(
@@ -20,11 +21,17 @@ func NewServices(
 	watchlistRepo repository.WatchlistRepository,
 	modelRepo repository.ModelRegistryRepository,
 	signalRepo repository.SignalRunRepository,
+	outcomeRepo repository.SignalOutcomeRepository,
+	jobRepo repository.JobRunRepository,
 	policyRepo repository.PolicyValidationRunRepository,
 	mlDataRoot string,
 	mlResearchRoot string,
 ) Services {
 	research := NewResearchArtifactsService(mlDataRoot, mlResearchRoot)
+	policy := NewPolicyValidationService(policyRepo, research, signalRepo)
+	if assetRepo != nil && marketDataRepo != nil {
+		policy = policy.WithOutcomeData(assetRepo, marketDataRepo, outcomeRepo)
+	}
 	return Services{
 		Assets:     NewAssetService(assetRepo),
 		MarketData: NewMarketDataService(assetRepo, marketDataRepo),
@@ -32,6 +39,7 @@ func NewServices(
 		Models:     NewModelRegistryService(modelRepo),
 		Analysis:   NewAnalysisService(assetRepo, modelRepo, signalRepo, research),
 		Research:   research,
-		Policy:     NewPolicyValidationService(policyRepo, research, signalRepo),
+		Policy:     policy,
+		Jobs:       NewJobService(jobRepo, policy),
 	}
 }

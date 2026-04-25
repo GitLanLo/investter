@@ -38,6 +38,17 @@ type SignalRunRepository interface {
 	ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalRun, error)
 }
 
+type SignalOutcomeRepository interface {
+	Upsert(ctx context.Context, outcome domain.SignalOutcome) (domain.SignalOutcome, error)
+	ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalOutcome, error)
+}
+
+type JobRunRepository interface {
+	Create(ctx context.Context, run domain.JobRun) (domain.JobRun, error)
+	Finish(ctx context.Context, id int64, status string, payload map[string]any, errorMessage string) (domain.JobRun, error)
+	ListLatest(ctx context.Context, limit int) ([]domain.JobRun, error)
+}
+
 type PolicyValidationRunRepository interface {
 	Create(ctx context.Context, run domain.PolicyValidationRun) (domain.PolicyValidationRun, error)
 	ListLatest(ctx context.Context, limit int) ([]domain.PolicyValidationRun, error)

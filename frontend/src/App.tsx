@@ -9,6 +9,7 @@ import {
   formatProbability,
   loadAssetWorkbench,
   loadWorkspaceShell,
+  runOutcomeMaterializationJob,
   runAnalysisForAsset,
   updatePolicyValidationRun,
 } from "./lib/api";
@@ -20,7 +21,11 @@ import type {
   CandidateSnapshot,
   CandleBar,
   FactorPoint,
+  PolicyOutcomeSummary,
+  PolicyOutcomeRecord,
   PolicyValidationRun,
+  JobRun,
+  JobSchedulerStatus,
   PolicyShadowSummary,
   ProductionPolicySnapshot,
   ScenarioSnapshot,
@@ -68,6 +73,7 @@ export function App() {
   const [loadingAsset, setLoadingAsset] = useState(false);
   const [runPending, setRunPending] = useState(false);
   const [policyValidationPending, setPolicyValidationPending] = useState(false);
+  const [policyOutcomeJobPending, setPolicyOutcomeJobPending] = useState(false);
   const [policyTransitionPendingId, setPolicyTransitionPendingId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -148,6 +154,10 @@ export function App() {
   const productionPolicy = shellData?.productionPolicy;
   const policyValidationRuns = shellData?.policyValidationRuns ?? [];
   const policyShadowSummary = shellData?.policyShadowSummary;
+  const policyOutcomeSummary = shellData?.policyOutcomeSummary;
+  const policyOutcomeHistory = shellData?.policyOutcomeHistory ?? [];
+  const jobScheduler = shellData?.jobScheduler;
+  const jobRuns = shellData?.jobRuns ?? [];
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
   const baseCandles = workbenchData?.candles ?? emptyCandles;
   const baseFactors = workbenchData?.factors ?? emptyFactors;
@@ -279,6 +289,30 @@ export function App() {
       setActionError(error instanceof Error ? error.message : "policy validation update failed");
     } finally {
       setPolicyTransitionPendingId(null);
+    }
+  }
+
+  async function handleRunOutcomeMaterializationJob() {
+    if (shellData?.generatedFrom === "mock") {
+      return;
+    }
+
+    setPolicyOutcomeJobPending(true);
+    setActionError(null);
+    try {
+      const nextJob = await runOutcomeMaterializationJob();
+      const refreshedShell = await loadWorkspaceShell();
+      startTransition(() => {
+        setShellData({
+          ...refreshedShell,
+          generatedFrom: "api",
+          jobRuns: [nextJob, ...refreshedShell.jobRuns.filter((item) => item.id !== nextJob.id)].slice(0, 6),
+        });
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "outcome materialization failed");
+    } finally {
+      setPolicyOutcomeJobPending(false);
     }
   }
 
@@ -539,6 +573,7 @@ export function App() {
                 row stores validation and test gates with operator notes.
               </p>
               <PolicyShadowSummaryCard summary={policyShadowSummary} />
+              <PolicyOutcomeSummaryCard summary={policyOutcomeSummary} />
               <button
                 className="action-button"
                 type="button"
@@ -549,6 +584,19 @@ export function App() {
               >
                 {policyValidationPending ? "Saving snapshot..." : "Save policy snapshot"}
               </button>
+              <button
+                className="action-button"
+                type="button"
+                onClick={() => {
+                  void handleRunOutcomeMaterializationJob();
+                }}
+                disabled={policyOutcomeJobPending || shellData?.generatedFrom === "mock"}
+              >
+                {policyOutcomeJobPending ? "Running outcome job..." : "Materialize outcomes"}
+              </button>
+              <PolicySchedulerCard scheduler={jobScheduler} />
+              <PolicyOutcomeHistoryCard items={policyOutcomeHistory} />
+              <PolicyJobsCard jobs={jobRuns} />
             </div>
             <div className="policy-run-list">
               {policyValidationRuns.length ? (
@@ -556,6 +604,7 @@ export function App() {
                   <PolicyValidationRunRow
                     key={run.id}
                     run={run}
+                    outcomeSummary={policyOutcomeSummary}
                     disabled={shellData?.generatedFrom === "mock" || policyTransitionPendingId === run.id}
                     onDecision={(decisionState) => {
                       void handleUpdatePolicyValidationRun(run, decisionState);
@@ -993,14 +1042,16 @@ function SignalHistoryRow({ signal, active }: { signal: SignalCard; active: bool
 
 function PolicyValidationRunRow({
   run,
+  outcomeSummary,
   disabled,
   onDecision,
 }: {
   run: PolicyValidationRun;
+  outcomeSummary?: PolicyOutcomeSummary;
   disabled: boolean;
   onDecision: (decisionState: string) => void;
 }) {
-  const nextDecisionActions = policyDecisionActions(run.decisionState);
+  const nextDecisionActions = policyDecisionActions(run.decisionState, run.id, outcomeSummary);
   return (
     <article className="policy-run-row">
       <div>
@@ -1011,6 +1062,15 @@ function PolicyValidationRunRow({
           {run.datasetVersion} · threshold {formatProbability(run.threshold)} · {formatDate(run.createdAt)}
         </p>
         {run.notes ? <p className="policy-run-note">{run.notes}</p> : null}
+        {outcomeSummary?.validationRunId === run.id && outcomeSummary.promotionBlockers.length ? (
+          <div className="policy-blocker-list">
+            {outcomeSummary.promotionBlockers.map((blocker) => (
+              <p key={blocker.code} className="policy-run-note">
+                {blocker.message}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {nextDecisionActions.length ? (
           <div className="policy-run-actions">
             {nextDecisionActions.map((action) => (
@@ -1070,7 +1130,163 @@ function PolicyShadowSummaryCard({ summary }: { summary?: PolicyShadowSummary })
   );
 }
 
-function policyDecisionActions(decisionState: string) {
+function PolicyOutcomeSummaryCard({ summary }: { summary?: PolicyOutcomeSummary }) {
+  if (!summary) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Forward outcomes</p>
+        <p className="empty-note">No realized policy outcomes yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">Forward outcomes</p>
+        <p className="signal-row-meta">
+          run #{summary.validationRunId} · {summary.maturedSignals} matured · {summary.pendingSignals} pending
+        </p>
+      </div>
+      <div className="shadow-summary-grid">
+        <Metric label="Precision" value={formatProbability(summary.realizedPrecision)} />
+        <Metric label="Hits / Misses" value={`${summary.hitSignals}/${summary.missSignals}`} />
+        <Metric label="Avg return" value={formatSignedPercent(summary.averageReturnPct)} />
+        <Metric label="Action return" value={formatSignedPercent(summary.averageActionReturnPct)} />
+        <Metric label="Overdue pending" value={String(summary.overduePendingSignals)} tone={summary.overduePendingSignals ? "warn" : "good"} />
+        <Metric label="Promote" value={summary.canPromote ? "ready" : "blocked"} tone={summary.canPromote ? "good" : "warn"} />
+        <Metric label="Blockers" value={String(summary.promotionBlockers.length)} tone={summary.promotionBlockers.length ? "warn" : "good"} />
+      </div>
+      {summary.promotionBlockers.length ? (
+        <div className="policy-blocker-list">
+          {summary.promotionBlockers.map((blocker) => (
+            <p key={blocker.code} className="policy-run-note">
+              {blocker.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      <p className="signal-row-meta">
+        {summary.firstMaturedAt && summary.lastMaturedAt
+          ? `${formatDate(summary.firstMaturedAt)} - ${formatDate(summary.lastMaturedAt)}`
+          : "Waiting for completed horizons"}
+        {summary.lastSignalAt ? ` · latest signal ${formatDate(summary.lastSignalAt)}` : ""}
+      </p>
+    </div>
+  );
+}
+
+function PolicyJobsCard({ jobs }: { jobs: JobRun[] }) {
+  if (!jobs.length) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Recent jobs</p>
+        <p className="empty-note">No materialization jobs yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">Recent jobs</p>
+        <p className="signal-row-meta">{jobs.length} tracked backend runs</p>
+      </div>
+      <div className="policy-job-list">
+        {jobs.map((job) => (
+          <div key={job.id} className="policy-job-row">
+            <div>
+              <p className="signal-row-title">
+                {job.jobType} · {job.status}
+              </p>
+              <p className="signal-row-meta">
+                {formatDate(job.startedAt)}
+                {job.finishedAt ? ` → ${formatDate(job.finishedAt)}` : ""}
+              </p>
+            </div>
+            <div className="policy-job-meta">
+              <span>matured {formatUnknownMetric(job.payload.matured_signals)}</span>
+              <span>pending {formatUnknownMetric(job.payload.pending_signals)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PolicySchedulerCard({ scheduler }: { scheduler?: JobSchedulerStatus }) {
+  if (!scheduler) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Scheduler</p>
+        <p className="empty-note">Scheduler status unavailable.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">Scheduler</p>
+        <p className="signal-row-meta">
+          {scheduler.enabled ? "automatic materialization enabled" : "manual materialization only"}
+        </p>
+      </div>
+      <div className="shadow-summary-grid">
+        <Metric label="Enabled" value={scheduler.enabled ? "on" : "off"} tone={scheduler.enabled ? "good" : "warn"} />
+        <Metric label="Interval" value={scheduler.interval} />
+        <Metric label="Batch limit" value={String(scheduler.limit)} />
+        <Metric label="Run on start" value={scheduler.runOnStart ? "yes" : "no"} tone={scheduler.runOnStart ? "good" : "neutral"} />
+      </div>
+    </div>
+  );
+}
+
+function PolicyOutcomeHistoryCard({ items }: { items: PolicyOutcomeRecord[] }) {
+  if (!items.length) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Outcome audit</p>
+        <p className="empty-note">No matured outcomes yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">Outcome audit</p>
+        <p className="signal-row-meta">{items.length} recent matured signals</p>
+      </div>
+      <div className="policy-outcome-list">
+        {items.map((item) => (
+          <div key={`${item.signalRunId}:${item.maturedAt}`} className="policy-outcome-row">
+            <div>
+              <p className="signal-row-title">
+                {item.assetId} · {item.signalDirection} · {item.isHit ? "hit" : "miss"}
+              </p>
+              <p className="signal-row-meta">
+                {formatDate(item.asOfTime)} → {formatDate(item.maturedAt)} · {item.timeframe} · horizon{" "}
+                {item.horizonBars}
+              </p>
+            </div>
+            <div className="policy-outcome-meta">
+              <span>{formatProbability(item.signalProbability)}</span>
+              <span>{formatSignedPercent(item.actionReturnPct)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function policyDecisionActions(
+  decisionState: string,
+  runId?: number,
+  outcomeSummary?: PolicyOutcomeSummary,
+) {
   switch (decisionState) {
     case "candidate":
       return [
@@ -1081,7 +1297,13 @@ function policyDecisionActions(decisionState: string) {
       return [
         { state: "promoted", label: "Promote" },
         { state: "blocked", label: "Block" },
-      ];
+      ].filter((action) => {
+        if (action.state !== "promoted") {
+          return true;
+        }
+        const matchesRun = outcomeSummary?.validationRunId === runId;
+        return matchesRun ? outcomeSummary?.canPromote === true : false;
+      });
     case "blocked":
       return [{ state: "candidate", label: "Reopen" }];
     default:
@@ -2172,6 +2394,10 @@ function formatCompactInteger(value: number | undefined) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatUnknownMetric(value: unknown) {
+  return typeof value === "number" ? String(value) : "n/a";
 }
 
 function formatRange(candles: CandleBar[]) {

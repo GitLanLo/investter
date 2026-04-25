@@ -128,9 +128,24 @@ invest-ml run-research-pipeline \
 - GUI Policy Gate, policy-vs-signal comparison and chart layout hardening;
 - data refresh and calibration report: `docs/ml/data_refresh_20260422.md`.
 
+## Sprint 4 status
+
+- Sprint 4 closure note: `docs/sprint4_completion.md`;
+- Sprint 4 plan: `docs/sprint4_plan.md`;
+- forward-validation outcome summary endpoint: `GET /ml/policy/outcomes`;
+- outcome audit endpoint: `GET /ml/policy/outcomes/history`;
+- manual outcome materialization endpoint: `POST /ml/policy/outcomes`;
+- tracked outcome materialization job: `POST /jobs/outcomes/materialize`;
+- scheduler status endpoint: `GET /jobs/scheduler`;
+- recurring backend scheduler via `OUTCOME_SCHEDULER_ENABLED`, `OUTCOME_SCHEDULER_INTERVAL`, `OUTCOME_SCHEDULER_LIMIT`, `OUTCOME_SCHEDULER_RUN_ON_START`;
+- promotion blockers include stale validation and overdue pending outcomes;
+- persisted matured outcomes in `signal_outcomes`;
+- `make sprint4-check` extends Sprint 3 smoke with realised policy outcome metrics.
+
 ## Документы
 
 - `development_plan.md`
+- `docs/development_sprint_plan.md`
 - `module_backlog.md`
 - `sprint1_issue_cards.md`
 - `github_issues_sprint1.md`
@@ -138,7 +153,9 @@ invest-ml run-research-pipeline \
 - `docs/sprint1_completion.md`
 - `docs/sprint2_completion.md`
 - `docs/sprint3_completion.md`
+- `docs/sprint4_completion.md`
 - `docs/sprint3_plan.md`
+- `docs/sprint4_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`

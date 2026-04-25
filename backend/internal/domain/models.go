@@ -105,6 +105,20 @@ type SignalRun struct {
 	CreatedAt          time.Time
 }
 
+type SignalOutcome struct {
+	ID              int64
+	SignalRunID     int64
+	AssetID         string
+	MaturedAt       time.Time
+	EntryPrice      float64
+	ExitPrice       float64
+	RawReturnPct    float64
+	ActionReturnPct float64
+	IsHit           bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type SignalPolicySnapshot struct {
 	PolicyStatus      string
 	ModelName         string
@@ -153,6 +167,62 @@ type PolicyShadowSummary struct {
 	LastSignalAt      time.Time
 }
 
+type PolicyOutcomeSummary struct {
+	ValidationRunID        int64
+	DecisionState          string
+	ModelName              string
+	CalibrationMethod      string
+	Threshold              float64
+	DatasetVersion         string
+	SignalsTotal           int
+	ActionableSignals      int
+	MaturedSignals         int
+	PendingSignals         int
+	OverduePendingSignals  int
+	HitSignals             int
+	MissSignals            int
+	RealizedPrecision      float64
+	AverageReturnPct       float64
+	AverageActionReturnPct float64
+	LastSignalAt           time.Time
+	FirstMaturedAt         time.Time
+	LastMaturedAt          time.Time
+	CanPromote             bool
+	PromotionBlockers      []PolicyPromotionBlocker
+}
+
+type PolicyOutcomeRecord struct {
+	SignalRunID       int64
+	AssetID           string
+	AsOfTime          time.Time
+	SignalState       string
+	SignalDirection   string
+	SignalProbability float64
+	Timeframe         string
+	HorizonBars       int
+	MaturedAt         time.Time
+	EntryPrice        float64
+	ExitPrice         float64
+	RawReturnPct      float64
+	ActionReturnPct   float64
+	IsHit             bool
+}
+
+type PolicyPromotionBlocker struct {
+	Code    string
+	Message string
+}
+
+type JobRun struct {
+	ID           int64
+	JobType      string
+	Status       string
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	Payload      map[string]any
+	ErrorMessage string
+}
+
 const (
 	ModelStatusActive = "active"
 
@@ -167,4 +237,8 @@ const (
 	PolicyDecisionShadowLive = "shadow_live"
 	PolicyDecisionPromoted   = "promoted"
 	PolicyDecisionBlocked    = "blocked"
+
+	JobStatusRunning   = "running"
+	JobStatusSucceeded = "succeeded"
+	JobStatusFailed    = "failed"
 )
