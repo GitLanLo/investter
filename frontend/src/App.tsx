@@ -490,7 +490,7 @@ export function App() {
             />
             <p className="chart-note">
               Drag across the chart to inspect any span. OHLCV aggregates over the selected range,
-              session gaps stay visible, wheel zooms, and arrows pan the viewport.
+              session gaps stay visible, wheel zooms, and arrow controls pan the viewport.
             </p>
           </div>
           <CandleChart
@@ -1528,12 +1528,10 @@ function CandleChart({
   const minPrice = lows.length ? Math.min(...lows) : 0;
   const maxPrice = highs.length ? Math.max(...highs) : 1;
   const span = Math.max(maxPrice - minPrice, 0.01);
-  const xPositions = buildTimeScalePositions(
-    visibleCandles.map((item) => item.timestamp),
-    { width: width - 52, padX },
-  );
+  const xPositions = buildOrdinalScalePositions(visibleCandles.length, { width: width - 52, padX });
   const minPixelGap = minimumAdjacentGap(xPositions);
   const candleWidth = Math.max(0.8, Math.min(10, minPixelGap * 0.72));
+  const wickWidth = Math.max(0.65, Math.min(2.4, candleWidth * 0.62));
   const maxVolume = Math.max(...visibleCandles.map((item) => item.volume), 1);
   const priceTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
     ratio,
@@ -1549,6 +1547,13 @@ function CandleChart({
   );
   const activeCandle = visibleCandles[activeIndex];
   const activeX = xPositions[activeIndex] ?? padX;
+  const chartRenderKey = [
+    timeframe,
+    viewport.startIndex,
+    viewport.endIndex,
+    visibleCandles[0]?.timestamp ?? "empty",
+    visibleCandles[visibleCandles.length - 1]?.timestamp ?? "empty",
+  ].join(":");
   const gapBands = buildGapBands(visibleCandles, xPositions, timeframe);
   const effectiveRange = brushState
     ? normalizeIndexRange(brushState.anchorIndex, brushState.currentIndex)
@@ -1770,13 +1775,14 @@ function CandleChart({
           ) : null}
         </div>
         <p className="zoom-note">
-          scale {visibleCandles.length} / {candles.length} bars, vertical wheel to zoom, horizontal scroll to move
+          scale {visibleCandles.length} / {candles.length} bars, vertical wheel to zoom
         </p>
       </div>
       <div className="chart-scroll-frame">
         <div className="chart-scroll-viewport" ref={chartScrollRef} tabIndex={0} aria-label="Scrollable candlestick chart">
           <div className="chart-scroll-canvas" style={{ width: chartCanvasWidth }}>
             <svg
+              key={chartRenderKey}
               className={`chart-svg ${brushState ? "chart-svg-selecting" : ""}`}
               viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="none"
@@ -1843,8 +1849,8 @@ function CandleChart({
               const tone = candle.close >= candle.open ? "up" : "down";
               const volumeHeight = Math.max(2, (candle.volume / maxVolume) * (volumeBottomY - volumeTopY));
               return (
-                <rect
-                  key={`${candle.timestamp}-volume`}
+                  <rect
+                    key={`${viewport.startIndex + index}:${candle.timestamp}:volume`}
                   x={x - candleWidth / 2}
                   y={volumeBottomY - volumeHeight}
                   width={candleWidth}
@@ -1892,14 +1898,21 @@ function CandleChart({
               const tone = candle.close >= candle.open ? "up" : "down";
 
               return (
-                <g key={candle.timestamp}>
-                  <line x1={x} x2={x} y1={wickTop} y2={wickBottom} className={`wick wick-${tone}`} />
+                <g key={`${viewport.startIndex + index}:${candle.timestamp}:candle`}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={wickTop}
+                    y2={wickBottom}
+                    className={`wick wick-${tone}`}
+                    style={{ strokeWidth: wickWidth }}
+                  />
                   <rect
                     x={x - candleWidth / 2}
                     y={bodyTop}
                     width={candleWidth}
                     height={bodyHeight}
-                    rx={3}
+                    rx={Math.min(3, candleWidth / 2)}
                     className={`candle candle-${tone}`}
                   />
                 </g>
@@ -2120,14 +2133,15 @@ function filterFactorsByRange(factors: FactorPoint[], range: FocusedChartRange |
 }
 
 function aggregateCandles(candles: CandleBar[], timeframe: ChartTimeframe) {
+  const normalizedCandles = normalizeCandles(candles);
   const timeframeMs = timeframeToMs(timeframe);
   const baseTimeframeMs = timeframeToMs("5m");
-  if (!candles.length || timeframeMs <= baseTimeframeMs) {
-    return candles;
+  if (!normalizedCandles.length || timeframeMs <= baseTimeframeMs) {
+    return normalizedCandles;
   }
 
   const buckets = new Map<number, CandleBar[]>();
-  for (const candle of candles) {
+  for (const candle of normalizedCandles) {
     const bucketStart = floorTimestamp(Date.parse(candle.timestamp), timeframeMs);
     const bucket = buckets.get(bucketStart) ?? [];
     bucket.push(candle);
@@ -2147,6 +2161,28 @@ function aggregateCandles(candles: CandleBar[], timeframe: ChartTimeframe) {
         volume: ordered.reduce((sum, item) => sum + item.volume, 0),
       };
     });
+}
+
+function normalizeCandles(candles: CandleBar[]) {
+  const byTimestamp = new Map<string, CandleBar>();
+  for (const candle of candles) {
+    const existing = byTimestamp.get(candle.timestamp);
+    if (!existing) {
+      byTimestamp.set(candle.timestamp, { ...candle });
+      continue;
+    }
+
+    byTimestamp.set(candle.timestamp, {
+      timestamp: candle.timestamp,
+      open: existing.open,
+      high: Math.max(existing.high, candle.high),
+      low: Math.min(existing.low, candle.low),
+      close: candle.close,
+      volume: existing.volume + candle.volume,
+    });
+  }
+
+  return Array.from(byTimestamp.values()).sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 function aggregateFactors(factors: FactorPoint[], timeframe: ChartTimeframe) {
@@ -2229,6 +2265,20 @@ function buildTimeScalePositions(
 
   return timestamps.map((timestamp) => {
     const ratio = (Date.parse(timestamp) - start) / span;
+    return padX + ratio * (width - padX * 2);
+  });
+}
+
+function buildOrdinalScalePositions(length: number, { width, padX }: { width: number; padX: number }) {
+  if (length <= 0) {
+    return [];
+  }
+  if (length === 1) {
+    return [padX + (width - padX * 2) / 2];
+  }
+
+  return Array.from({ length }, (_, index) => {
+    const ratio = index / (length - 1);
     return padX + ratio * (width - padX * 2);
   });
 }
@@ -2401,7 +2451,7 @@ function clampViewport(windowSize: number, windowEndIndex: number, length: numbe
 }
 
 function maxViewportBars(length: number) {
-  return Math.min(length, 1440);
+  return Math.min(length, 320);
 }
 
 function initialViewportBars(length: number, timeframe: ChartTimeframe) {
@@ -2421,8 +2471,7 @@ function initialViewportBars(length: number, timeframe: ChartTimeframe) {
 }
 
 function chartScrollCanvasWidth(length: number, timeframe: ChartTimeframe) {
-  const bars = initialViewportBars(length, timeframe);
-  return Math.max(1320, Math.ceil(bars * 8 + 120));
+  return 980;
 }
 
 function minimumAdjacentGap(positions: number[]) {

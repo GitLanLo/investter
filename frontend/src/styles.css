@@ -726,7 +726,7 @@ a {
 .chart-scroll-viewport {
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
@@ -2122,6 +2122,9 @@ body::before {
     linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.2));
   border: 1px solid rgba(17, 25, 35, 0.08);
   min-width: 980px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
 }
 
 .chart-grid-line {
