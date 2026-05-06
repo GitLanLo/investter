@@ -14,6 +14,7 @@ type ResearchArtifactsOverview struct {
 	DatasetManifest    map[string]any
 	ResearchSummary    map[string]any
 	CalibrationSummary map[string]any
+	GridMatrix         map[string]any
 	SourcePaths        map[string]string
 	Warnings           []string
 }
@@ -127,6 +128,25 @@ func (s *ResearchArtifactsService) LoadOverview(ctx context.Context) (ResearchAr
 		overview.SourcePaths["calibration_summary"] = calibrationPath
 	}
 
+	gridMatrixPath, gridMatrix, gridWarnings, err := findLatestJSON(
+		ctx,
+		s.researchRoot,
+		"timeframe_horizon_matrix.json",
+		func(payload map[string]any) bool {
+			_, hasGridName := payload["grid_name"]
+			_, hasResults := payload["results"]
+			return hasGridName && hasResults
+		},
+	)
+	if err != nil {
+		return ResearchArtifactsOverview{}, err
+	}
+	overview.Warnings = append(overview.Warnings, gridWarnings...)
+	if gridMatrixPath != "" {
+		overview.GridMatrix = gridMatrix
+		overview.SourcePaths["grid_matrix"] = gridMatrixPath
+	}
+
 	return overview, nil
 }
 
@@ -196,6 +216,14 @@ func (s *ResearchArtifactsService) LoadDocuments(ctx context.Context) ([]Researc
 		"Calibration summary",
 		overview.SourcePaths["calibration_summary"],
 		overview.CalibrationSummary,
+	); err != nil {
+		return nil, err
+	}
+	if err := appendJSONDocument(
+		"grid_matrix",
+		"Timeframe Horizon Matrix",
+		overview.SourcePaths["grid_matrix"],
+		overview.GridMatrix,
 	); err != nil {
 		return nil, err
 	}

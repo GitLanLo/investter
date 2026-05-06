@@ -470,8 +470,41 @@ function mapResearchOverview(dto: ResearchOverviewDTO): MLOverview {
     warnings: dto.warnings ?? [],
     sourcePaths: dto.source_paths ?? {},
     dataset: mapDataset(dto.dataset_manifest),
+    gridMatrix: mapGridMatrix(dto.grid_matrix),
     research: mapResearchSummary(dto.research_summary),
     calibration: mapCalibrationSummary(dto.calibration_summary),
+  };
+}
+
+function mapGridMatrix(raw: Record<string, unknown> | undefined) {
+  if (!raw) {
+    return undefined;
+  }
+
+  const resultsRaw = Array.isArray(raw.results) ? raw.results : [];
+
+  return {
+    status: stringValue(raw.status) ?? "unknown",
+    gridName: stringValue(raw.grid_name) ?? "unknown",
+    timeframes: stringArray(raw.timeframes),
+    horizons: (Array.isArray(raw.horizons) ? raw.horizons : []).filter((h): h is number => typeof h === "number"),
+    expectedResultCount: numberValue(raw.expected_result_count) ?? 0,
+    completedResultCount: numberValue(raw.completed_result_count) ?? 0,
+    results: resultsRaw.map((item) => {
+      const rec = recordValue(item);
+      return {
+        status: stringValue(rec?.status) ?? "unknown",
+        timeframe: stringValue(rec?.timeframe) ?? "n/a",
+        horizon: numberValue(rec?.horizon) ?? 0,
+        datasetVersion: stringValue(rec?.dataset_version) ?? "n/a",
+        rows: numberValue(rec?.rows) ?? 0,
+        valActionableF1: numberValue(rec?.val_actionable_f1),
+        valPrecision: numberValue(rec?.val_precision),
+        testActionableF1: numberValue(rec?.test_actionable_f1),
+        valCoverage: numberValue(rec?.val_coverage),
+        valEce: numberValue(rec?.val_ece),
+      };
+    }),
   };
 }
 

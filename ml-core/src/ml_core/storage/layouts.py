@@ -58,12 +58,14 @@ def write_feature_store(
     *,
     data_root: Path,
     ticker: str,
+    timeframe: str,
+    horizon_bars: int,
     schema_version: str = FEATURE_SCHEMA_VERSION,
 ) -> list[Path]:
     prepared = df.copy()
     time_column = "asof_time" if "asof_time" in prepared.columns else "timestamp"
     prepared[time_column] = pd.to_datetime(prepared[time_column], utc=True)
-    base = data_root / "features" / f"schema={schema_version}" / f"ticker={ticker}"
+    base = data_root / "features" / f"schema={schema_version}" / f"ticker={ticker}" / f"timeframe={timeframe}" / f"horizon={horizon_bars}"
     return write_partitioned_frame(prepared, base_path=base, time_column=time_column)
 
 
@@ -71,11 +73,13 @@ def load_feature_store(
     data_root: Path,
     *,
     ticker: str,
+    timeframe: str,
+    horizon_bars: int,
     schema_version: str = FEATURE_SCHEMA_VERSION,
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    base = data_root / "features" / f"schema={schema_version}" / f"ticker={ticker}"
+    base = data_root / "features" / f"schema={schema_version}" / f"ticker={ticker}" / f"timeframe={timeframe}" / f"horizon={horizon_bars}"
     df = _load_parquet_files(base.rglob("*.parquet"))
     if df.empty:
         return df

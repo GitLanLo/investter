@@ -151,7 +151,7 @@ Exit criteria:
 - Job history is visible.
 - Re-running jobs is safe.
 
-## Sprint 7. Dataset Expansion And Timeframe/Horizon Research (Active)
+## Sprint 7. Dataset Expansion And Timeframe/Horizon Research (Closed)
 
 Goal:
 build enough data and evidence to choose the right timeframe/horizon before neural modeling.
@@ -183,10 +183,28 @@ Exit criteria:
 - The decision is based on comparable metrics, not intuition.
 - Dataset size is sufficient for the selected model family.
 
-## Sprint 8. Neural Model And Deployable Contract
+Closure:
+
+- Decision document: `docs/ml/sprint7_timeframe_horizon_decision.md`.
+- Selected Sprint 8 default: `1h`, horizon `24` bars.
+- Data-backed universe: 25 ML-enabled TQBR instruments.
+- Matrix artifact: `artifacts/research/sprint7/timeframe_horizon_matrix.json`.
+
+## Sprint 8. Neural Model And Deployable Contract (Planned)
 
 Goal:
 train a first neural sequence model and make it deployable.
+
+Detailed implementation plan:
+
+- `docs/sprint8_plan.md`.
+
+Starting point:
+
+- timeframe: `1h`;
+- prediction horizon: `24` bars;
+- ML universe: 25 data-backed TQBR instruments;
+- baseline comparator: `hgb_multiclass` from `sprint7_1h_h24_20260506`.
 
 ML work:
 

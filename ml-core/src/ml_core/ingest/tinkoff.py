@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import ssl
+import time
 from typing import Any, Mapping
 from urllib import error, request
 
@@ -79,7 +81,6 @@ INSTRUMENT_KIND_MAP = {
     "clearing_certificate": "INSTRUMENT_TYPE_CLEARING_CERTIFICATE",
 }
 
-
 class TinkoffAPIError(RuntimeError):
     """Raised when Tinkoff REST API returns an error."""
 
@@ -102,6 +103,7 @@ class TinkoffConfig:
     base_url: str = PROD_REST_URL
     timeout_seconds: float = 30.0
     user_agent: str = "invest-ml/0.1"
+    ca_cert_file: str | None = None
 
 
 @dataclass(slots=True)
@@ -257,14 +259,32 @@ class TinkoffRESTClient:
                 "User-Agent": self.config.user_agent,
             },
         )
-        try:
-            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise TinkoffAPIError(f"Tinkoff API HTTP {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise TinkoffAPIError(f"Tinkoff API request failed: {exc.reason}") from exc
+
+        ctx = None
+        if self.config.ca_cert_file:
+            ctx = ssl.create_default_context()
+            ctx.load_verify_locations(cafile=self.config.ca_cert_file)
+
+        retries = 3
+        backoff = 2.0
+        last_exc: TinkoffAPIError | None = None
+
+        for attempt in range(retries):
+            try:
+                with request.urlopen(req, timeout=self.config.timeout_seconds, context=ctx) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                last_exc = TinkoffAPIError(f"Tinkoff API HTTP {exc.code}: {detail}")
+                if exc.code not in (429, 500, 502, 503, 504):
+                    raise last_exc from exc
+            except error.URLError as exc:
+                last_exc = TinkoffAPIError(f"Tinkoff API request failed: {exc.reason}")
+
+            if attempt < retries - 1:
+                time.sleep(backoff * (2 ** attempt))
+
+        raise last_exc or TinkoffAPIError("Tinkoff API request failed")
 
 
 @dataclass(slots=True)
@@ -335,11 +355,14 @@ def load_tinkoff_config_from_env() -> TinkoffConfig:
         raise TinkoffConfigError("TINKOFF_INVEST_TIMEOUT_SECONDS must be numeric") from exc
 
     user_agent = os.getenv("TINKOFF_INVEST_USER_AGENT", "invest-ml/0.1").strip() or "invest-ml/0.1"
+    ca_cert_file = os.getenv("TINKOFF_CA_CERT_FILE", "").strip() or None
+
     return TinkoffConfig(
         token=token,
         base_url=base_url,
         timeout_seconds=timeout_seconds,
         user_agent=user_agent,
+        ca_cert_file=ca_cert_file,
     )
 
 
@@ -548,6 +571,7 @@ def sync_tinkoff_universe(
     incremental: bool = True,
     overlap_bars: int = 3,
     client: TinkoffRESTClient | None = None,
+    timeframe_override: str | None = None,
 ) -> dict[str, Any]:
     config = load_universe_config(config_path)
     rest_client = client or TinkoffRESTClient(load_tinkoff_config_from_env())
@@ -556,11 +580,11 @@ def sync_tinkoff_universe(
     for item in config.assets:
         if not item.enabled:
             continue
-        assets.append(
-            sync_tinkoff_asset_history(
+        try:
+            res = sync_tinkoff_asset_history(
                 data_root=data_root,
                 ticker=item.ticker,
-                timeframe=item.timeframe,
+                timeframe=timeframe_override or item.timeframe,
                 start=start,
                 end=end,
                 instrument_kind=item.instrument_kind,
@@ -569,18 +593,25 @@ def sync_tinkoff_universe(
                 overlap_bars=overlap_bars,
                 client=rest_client,
             )
-        )
+            assets.append(res)
+        except Exception as exc:
+            assets.append({
+                "ticker": item.ticker,
+                "timeframe": timeframe_override or item.timeframe,
+                "error": str(exc),
+                "rows": 0,
+            })
 
     factors: list[dict[str, Any]] = []
     for item in config.factors:
         if not item.enabled:
             continue
-        factors.append(
-            sync_tinkoff_factor_history(
+        try:
+            res = sync_tinkoff_factor_history(
                 data_root=data_root,
                 alias=item.alias,
                 ticker=item.ticker,
-                timeframe=item.timeframe,
+                timeframe=timeframe_override or item.timeframe,
                 start=start,
                 end=end,
                 instrument_kind=item.instrument_kind,
@@ -589,7 +620,15 @@ def sync_tinkoff_universe(
                 overlap_bars=overlap_bars,
                 client=rest_client,
             )
-        )
+            factors.append(res)
+        except Exception as exc:
+            factors.append({
+                "alias": item.alias,
+                "ticker": item.ticker,
+                "timeframe": timeframe_override or item.timeframe,
+                "error": str(exc),
+                "rows": 0,
+            })
 
     summary = {
         "universe_name": config.name,

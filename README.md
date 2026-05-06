@@ -1,6 +1,6 @@
 # invest
 
-Рабочий Sprint 5 baseline для `invest`: backend, ML/data core, operator GUI, forward validation и instrument catalog.
+Рабочий Sprint 7 baseline для `invest`: backend, ML/data core, operator GUI, forward validation, instrument catalog и timeframe/horizon research.
 
 ## Что уже сделано
 
@@ -19,7 +19,8 @@
 - Sprint 4 закрыт; completion note: `docs/sprint4_completion.md`.
 - Sprint 5 закрыт; completion note: `docs/sprint5_completion.md`.
 - Sprint 6 закрыт; completion note: `docs/sprint6_completion.md`.
-- Sprint 7 активен; plan: `docs/sprint7_plan.md`.
+- Sprint 7 закрыт; plan: `docs/sprint7_plan.md`, decision: `docs/ml/sprint7_timeframe_horizon_decision.md`.
+- Sprint 8 запланирован; detailed plan: `docs/sprint8_plan.md`.
 - данные обновлены до `mvp_live_20260422`; активный Sprint 3 policy candidate: `logreg_multiclass` + `identity` calibration, threshold `0.30`, validation run `id=2` в состоянии `shadow_live`; refresh note: `docs/ml/data_refresh_20260422.md`.
 
 ## Структура
@@ -159,9 +160,19 @@ invest-ml run-research-pipeline \
 ## Sprint 7 status
 
 - Sprint 7 plan: `docs/sprint7_plan.md`;
-- Expand universe to 20-50 liquid instruments;
-- Execute research grid across timeframes (5m, 15m, 1h) and horizons (6, 12, 24);
-- Determine optimal timeframe/horizon default for production.
+- expanded data-backed universe: 25 liquid TQBR instruments;
+- research grid completed across timeframes (`5m`, `15m`, `1h`) and horizons (`6`, `12`, `24`);
+- selected Sprint 8 default: `1h`, horizon `24`;
+- decision note: `docs/ml/sprint7_timeframe_horizon_decision.md`;
+- coverage note: `docs/ml/sprint7_data_coverage.md`;
+- `make sprint7-check` verifies the matrix artifact through backend API.
+
+## Sprint 8 plan
+
+- Sprint 8 plan: `docs/sprint8_plan.md`;
+- selected starting point: `1h`, horizon `24`, 25 TQBR instruments;
+- main deliverable: first neural sequence model plus deployable model manifest;
+- required conclusion: neural candidate, documented rejection, or data-volume blocker backed by metrics.
 
 ## Документы
 
@@ -179,6 +190,8 @@ invest-ml run-research-pipeline \
 - `docs/sprint3_plan.md`
 - `docs/sprint4_plan.md`
 - `docs/sprint5_plan.md`
+- `docs/sprint7_plan.md`
+- `docs/sprint8_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`

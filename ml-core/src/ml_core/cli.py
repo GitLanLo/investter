@@ -17,6 +17,8 @@ from ml_core.pipelines.materialize import (
     materialize_feature_store,
 )
 from ml_core.pipelines.research import ResearchPipelineConfig, run_research_pipeline
+from ml_core.pipelines.research_grid import ResearchGridConfig, run_research_grid
+from ml_core.qa.coverage import generate_coverage_report, write_coverage_report
 from ml_core.storage.layouts import ingest_asset_frame, ingest_factor_frame
 from ml_core.training.baselines import BaselineTrainingConfig, train_baseline_pack
 from ml_core.training.calibration import (
@@ -123,6 +125,19 @@ def main() -> None:
     run_research_pipeline_cmd.add_argument("--run-ablation", action="store_true")
     run_research_pipeline_cmd.add_argument("--ablation-threshold", action="append", type=float, default=[])
 
+    run_research_grid_cmd = subparsers.add_parser("run-research-grid")
+    run_research_grid_cmd.add_argument("--data-root", required=True)
+    run_research_grid_cmd.add_argument("--dataset-output-root", required=True)
+    run_research_grid_cmd.add_argument("--research-output-root", required=True)
+    run_research_grid_cmd.add_argument("--grid-name", required=True)
+    run_research_grid_cmd.add_argument("--ticker", action="append", required=True)
+    run_research_grid_cmd.add_argument("--factor", action="append", default=[])
+    run_research_grid_cmd.add_argument("--timeframe", action="append", default=[])
+    run_research_grid_cmd.add_argument("--horizon", action="append", type=int, default=[])
+    run_research_grid_cmd.add_argument("--start")
+    run_research_grid_cmd.add_argument("--end")
+    run_research_grid_cmd.add_argument("--decision-threshold", type=float, default=0.65)
+
     ingest_asset = subparsers.add_parser("ingest-asset-parquet")
     ingest_asset.add_argument("--input-parquet", required=True)
     ingest_asset.add_argument("--data-root", required=True)
@@ -153,6 +168,8 @@ def main() -> None:
     materialize_dataset_cmd.add_argument("--output-root", required=True)
     materialize_dataset_cmd.add_argument("--dataset-version", required=True)
     materialize_dataset_cmd.add_argument("--ticker", action="append", required=True)
+    materialize_dataset_cmd.add_argument("--timeframe", default="5m")
+    materialize_dataset_cmd.add_argument("--horizon-bars", type=int, default=12)
     materialize_dataset_cmd.add_argument("--train-ratio", type=float, default=0.7)
     materialize_dataset_cmd.add_argument("--val-ratio", type=float, default=0.15)
     materialize_dataset_cmd.add_argument("--purge-gap-bars", type=int, default=12)
@@ -188,6 +205,11 @@ def main() -> None:
     tinkoff_universe.add_argument("--to", dest="to_time", required=True)
     tinkoff_universe.add_argument("--no-incremental", action="store_true")
     tinkoff_universe.add_argument("--overlap-bars", type=int, default=3)
+    tinkoff_universe.add_argument("--timeframe", help="override timeframe for all assets/factors")
+
+    raw_coverage = subparsers.add_parser("raw-coverage-report")
+    raw_coverage.add_argument("--data-root", required=True)
+    raw_coverage.add_argument("--output", required=True)
 
     args = parser.parse_args()
 
@@ -358,6 +380,30 @@ def main() -> None:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         return
 
+    if args.command == "run-research-grid":
+        provider = LocalParquetProvider(root=Path(args.data_root))
+        timeframes = list(dict.fromkeys(args.timeframe or ["5m", "15m", "1h"]))
+        horizons = list(dict.fromkeys(args.horizon or [6, 12, 24]))
+
+        summary = run_research_grid(
+            provider,
+            config=ResearchGridConfig(
+                data_root=Path(args.data_root),
+                dataset_output_root=Path(args.dataset_output_root),
+                research_output_root=Path(args.research_output_root),
+                grid_name=args.grid_name,
+                tickers=args.ticker,
+                factor_aliases=args.factor,
+                timeframes=timeframes,
+                horizons=horizons,
+                start=pd.Timestamp(args.start) if args.start else None,
+                end=pd.Timestamp(args.end) if args.end else None,
+                decision_threshold=args.decision_threshold,
+            )
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+        return
+
     if args.command == "ingest-asset-parquet":
         df = pd.read_parquet(args.input_parquet)
         ingest_asset_frame(
@@ -407,11 +453,15 @@ def main() -> None:
             output_root=Path(args.output_root),
             dataset_version=args.dataset_version,
             tickers=args.ticker,
+            timeframe=args.timeframe,
+            horizon_bars=args.horizon_bars,
             split_config=SplitConfig(
                 dataset_version=args.dataset_version,
                 train_ratio=args.train_ratio,
                 val_ratio=args.val_ratio,
                 purge_gap_bars=args.purge_gap_bars,
+                timeframe=args.timeframe,
+                horizon_bars=args.horizon_bars,
             ),
         )
         return
@@ -455,10 +505,16 @@ def main() -> None:
             end=_parse_required_timestamp(args.to_time),
             incremental=not args.no_incremental,
             overlap_bars=args.overlap_bars,
+            timeframe_override=args.timeframe,
         )
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         return
 
+    if args.command == "raw-coverage-report":
+        report = generate_coverage_report(Path(args.data_root))
+        write_coverage_report(report, Path(args.output))
+        print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        return
 
 def _parse_optional_timestamp(value: str | None) -> pd.Timestamp | None:
     if not value:

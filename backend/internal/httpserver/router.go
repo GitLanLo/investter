@@ -178,6 +178,7 @@ type mlResearchOverviewResponse struct {
 	DatasetManifest    map[string]any    `json:"dataset_manifest,omitempty"`
 	ResearchSummary    map[string]any    `json:"research_summary,omitempty"`
 	CalibrationSummary map[string]any    `json:"calibration_summary,omitempty"`
+	GridMatrix         map[string]any    `json:"grid_matrix,omitempty"`
 	SourcePaths        map[string]string `json:"source_paths,omitempty"`
 	Warnings           []string          `json:"warnings,omitempty"`
 }
@@ -798,6 +799,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			DatasetManifest:    overview.DatasetManifest,
 			ResearchSummary:    overview.ResearchSummary,
 			CalibrationSummary: overview.CalibrationSummary,
+			GridMatrix:         overview.GridMatrix,
 			SourcePaths:        overview.SourcePaths,
 			Warnings:           overview.Warnings,
 		})

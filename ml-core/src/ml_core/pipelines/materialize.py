@@ -62,6 +62,8 @@ def materialize_feature_store(
         labeled,
         data_root=config.data_root,
         ticker=config.ticker,
+        timeframe=config.timeframe,
+        horizon_bars=config.label_config.horizon_bars,
         schema_version=config.feature_config.feature_schema_version,
     )
 
@@ -83,6 +85,8 @@ def materialize_dataset(
     output_root: Path,
     dataset_version: str,
     tickers: list[str],
+    timeframe: str,
+    horizon_bars: int,
     split_config: SplitConfig | None = None,
     schema_version: str = FEATURE_SCHEMA_VERSION,
 ) -> dict:
@@ -94,6 +98,8 @@ def materialize_dataset(
         frame = load_feature_store(
             data_root,
             ticker=ticker,
+            timeframe=timeframe,
+            horizon_bars=horizon_bars,
             schema_version=schema_version,
         )
         if frame.empty:

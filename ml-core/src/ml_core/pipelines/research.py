@@ -86,6 +86,8 @@ def run_research_pipeline(
         output_root=config.dataset_output_root,
         dataset_version=config.dataset_version,
         tickers=config.tickers,
+        timeframe=config.timeframe,
+        horizon_bars=config.label_config.horizon_bars,
         split_config=split_config,
         schema_version=config.feature_config.feature_schema_version,
     )

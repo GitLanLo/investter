@@ -53,6 +53,7 @@ def build_raw_qa_report(
 
     report["duplicate_timestamps"] = int(prepared["timestamp"].duplicated().sum())
     report["is_monotonic"] = bool(prepared["timestamp"].is_monotonic_increasing)
+    report["latest_candle_timestamp"] = prepared["timestamp"].max().isoformat()
     report["range"] = {
         "min": prepared["timestamp"].min().isoformat(),
         "max": prepared["timestamp"].max().isoformat(),
@@ -70,6 +71,13 @@ def build_raw_qa_report(
         report["gap_count"] = int(len(gaps))
         if not gaps.empty:
             report["largest_gap_minutes"] = float(gaps.max() / pd.Timedelta(minutes=1))
+
+        total_time = prepared["timestamp"].max() - prepared["timestamp"].min()
+        expected_raw_bars = int(total_time / expected_delta) + 1
+        if expected_raw_bars > 0:
+            report["coverage_percentage"] = round((len(prepared) / expected_raw_bars) * 100.0, 2)
+        else:
+            report["coverage_percentage"] = 0.0
 
     if report["duplicate_timestamps"] > 0 or not report["is_monotonic"]:
         report["status"] = "error"

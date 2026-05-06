@@ -33,6 +33,7 @@ import type {
   PolicyValidationRun,
   JobRun,
   JobSchedulerStatus,
+  GridMatrixSnapshot,
   PolicyShadowSummary,
   ProductionPolicySnapshot,
   SchedulerInfo,
@@ -698,6 +699,10 @@ export function App() {
             <SplitBar label="Validation" value={overview?.dataset?.valRows ?? 0} total={totalRows(overview)} />
             <SplitBar label="Test" value={overview?.dataset?.testRows ?? 0} total={totalRows(overview)} />
           </div>
+
+          {overview?.gridMatrix && (
+            <GridMatrixCard matrix={overview.gridMatrix} />
+          )}
         </section>
 
         <section className="card artifact-board" id="artifact-feed">
@@ -1379,6 +1384,42 @@ function PolicyJobsCard({
           </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function GridMatrixCard({ matrix }: { matrix: GridMatrixSnapshot }) {
+  if (!matrix.results || matrix.results.length === 0) {
+    return null;
+  }
+
+  const bestResult = [...matrix.results].sort((a, b) => (b.valActionableF1 ?? 0) - (a.valActionableF1 ?? 0))[0];
+
+  return (
+    <div className="shadow-summary-card" style={{ marginTop: "1rem" }}>
+      <p className="shadow-summary-title">Timeframe & Horizon Decision</p>
+      <p className="signal-row-meta">
+        Grid: {matrix.gridName} · {matrix.completedResultCount}/{matrix.expectedResultCount} completed
+      </p>
+
+      <div className="policy-job-list" style={{ marginTop: "0.5rem" }}>
+        {matrix.results.map((res) => (
+          <div key={res.datasetVersion} className="policy-job-row" style={res === bestResult ? { background: "var(--accent-15)", borderColor: "var(--accent)" } : {}}>
+            <div>
+              <p className="signal-row-title">
+                {res.timeframe} · {res.horizon} bars
+              </p>
+              <p className="signal-row-meta">
+                {formatCompactInteger(res.rows)} rows
+              </p>
+            </div>
+            <div className="policy-job-meta">
+              <span>F1: {formatMetric(res.valActionableF1)}</span>
+              <span>Cov: {formatProbability(res.valCoverage)}</span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

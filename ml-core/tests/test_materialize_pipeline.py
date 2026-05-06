@@ -65,7 +65,7 @@ def test_materialize_feature_store_and_dataset_pipeline(tmp_path: Path) -> None:
     assert result["feature_schema_version"] == FEATURE_SCHEMA_VERSION
     assert result["factor_aliases"] == ["brent", "rtsi", "usdrub"]
 
-    feature_frame = load_feature_store(data_root, ticker="SBER")
+    feature_frame = load_feature_store(data_root, ticker="SBER", timeframe="5m", horizon_bars=12)
     assert not feature_frame.empty
     assert {"label_class", "label_up", "label_down", "label_no_trade"}.issubset(feature_frame.columns)
     assert feature_frame["feature_schema_version"].eq(FEATURE_SCHEMA_VERSION).all()
@@ -75,6 +75,8 @@ def test_materialize_feature_store_and_dataset_pipeline(tmp_path: Path) -> None:
         output_root=dataset_root,
         dataset_version="v1",
         tickers=["SBER"],
+        timeframe="5m",
+        horizon_bars=12,
     )
 
     assert manifest["dataset_version"] == "v1"

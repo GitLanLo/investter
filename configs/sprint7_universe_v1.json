@@ -1,0 +1,36 @@
+{
+  "name": "sprint7_universe_v1",
+  "assets": [
+    { "ticker": "SBER", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Sberbank", "sector": "Financials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "SBERP", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Sberbank Pref", "sector": "Financials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "GAZP", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Gazprom", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "LKOH", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Lukoil", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "ROSN", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Rosneft", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "SNGS", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Surgutneftegas", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "SNGSP", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Surgutneftegas Pref", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "NVTK", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Novatek", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "TATN", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Tatneft", "sector": "Energy", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "GMKN", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Norilsk Nickel", "sector": "Materials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "PLZL", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Polyus", "sector": "Materials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "CHMF", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Severstal", "sector": "Materials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "NLMK", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "NLMK", "sector": "Materials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "ALRS", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Alrosa", "sector": "Materials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "YNDX", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Yandex", "sector": "Technology", "liquidity_tier": 1, "enabled": false, "ml_enabled": false, "training_exclusion_reason": "Tinkoff FindInstrument did not resolve YNDX on TQBR during Sprint 7 backfill" },
+    { "ticker": "T", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "T-Bank", "sector": "Financials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "MOEX", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Moscow Exchange", "sector": "Financials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "VTBR", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "VTB Bank", "sector": "Financials", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "CBOM", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Credit Bank of Moscow", "sector": "Financials", "liquidity_tier": 2, "ml_enabled": true },
+    { "ticker": "MGNT", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Magnit", "sector": "Consumer Staples", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "MTSS", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "MTS", "sector": "Communication Services", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "IRAO", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Inter RAO", "sector": "Utilities", "liquidity_tier": 1, "ml_enabled": true },
+    { "ticker": "TRNFP", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Transneft Pref", "sector": "Energy", "liquidity_tier": 2, "ml_enabled": true },
+    { "ticker": "PHOR", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "PhosAgro", "sector": "Materials", "liquidity_tier": 2, "ml_enabled": true },
+    { "ticker": "PIKK", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "PIK Group", "sector": "Real Estate", "liquidity_tier": 2, "ml_enabled": true },
+    { "ticker": "AFLT", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Aeroflot", "sector": "Industrials", "liquidity_tier": 2, "ml_enabled": true }
+  ],
+  "factors": [
+    { "alias": "usdrub", "ticker": "USD000UTSTOM", "timeframe": "5m", "instrument_kind": "currency", "class_code": "CETS" },
+    { "alias": "brent", "ticker": "BRM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" },
+    { "alias": "rtsi", "ticker": "RIM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" }
+  ]
+}

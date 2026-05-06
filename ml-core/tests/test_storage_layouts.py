@@ -100,6 +100,33 @@ def test_partition_writer_rewrites_existing_partition_without_duplicates(tmp_pat
     assert loaded_asset["timestamp"].is_unique
 
 
+def test_local_provider_resamples_5m_history_when_higher_timeframe_is_missing(tmp_path: Path) -> None:
+    data_root = tmp_path / "data"
+    asset_df = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01T10:00:00Z", periods=6, freq="5min"),
+            "open": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0],
+            "high": [101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
+            "low": [99.0, 100.0, 101.0, 102.0, 103.0, 104.0],
+            "close": [100.5, 101.5, 102.5, 103.5, 104.5, 105.5],
+            "volume": [10, 20, 30, 40, 50, 60],
+        }
+    )
+
+    ingest_asset_frame(asset_df, data_root=data_root, ticker="SBER", timeframe="5m", source="unit_test")
+
+    provider = LocalParquetProvider(root=data_root)
+    loaded_asset = provider.fetch_asset_history("SBER", "15m")
+
+    assert len(loaded_asset) == 2
+    assert loaded_asset["timeframe"].eq("15m").all()
+    assert loaded_asset.iloc[0]["open"] == 100.0
+    assert loaded_asset.iloc[0]["high"] == 103.0
+    assert loaded_asset.iloc[0]["low"] == 99.0
+    assert loaded_asset.iloc[0]["close"] == 102.5
+    assert loaded_asset.iloc[0]["volume"] == 60
+
+
 def test_dataset_partition_writer_preserves_same_timestamp_for_different_tickers(tmp_path: Path) -> None:
     dataset_root = tmp_path / "dataset"
     first = pd.DataFrame(

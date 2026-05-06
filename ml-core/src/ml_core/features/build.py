@@ -55,7 +55,7 @@ def _prepare_asset_frame(asset_df: pd.DataFrame, *, ticker: str, timeframe: str)
         raise ValueError(f"asset_df is missing columns: {sorted(missing)}")
 
     df = asset_df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    df["timestamp"] = _to_utc_ns(df["timestamp"])
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["ticker"] = ticker
     df["timeframe"] = timeframe
@@ -185,16 +185,21 @@ def _merge_factor_frames(
     ffill_limit: int,
 ) -> pd.DataFrame:
     out = df.copy()
+    out["timestamp"] = _to_utc_ns(out["timestamp"])
     for alias, frame in factor_frames.items():
         if frame.empty:
             continue
         factor = frame.copy()
-        factor["timestamp"] = pd.to_datetime(factor["timestamp"], utc=True)
+        factor["timestamp"] = _to_utc_ns(factor["timestamp"])
         factor = factor.sort_values("timestamp").reset_index(drop=True)
         factor = factor[["timestamp", "close"]].rename(columns={"close": f"{alias}_close"})
         out = pd.merge_asof(out, factor, on="timestamp", direction="backward", tolerance=tolerance)
         out[f"{alias}_close"] = out[f"{alias}_close"].ffill(limit=ffill_limit)
     return out
+
+
+def _to_utc_ns(values: pd.Series) -> pd.Series:
+    return pd.to_datetime(values, utc=True).astype("datetime64[ns, UTC]")
 
 
 def _add_cross_asset_features(df: pd.DataFrame, *, aliases: tuple[str, ...]) -> pd.DataFrame:

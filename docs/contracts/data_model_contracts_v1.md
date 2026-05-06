@@ -53,13 +53,14 @@
 
 Рекомендуемый layout:
 
-`data/features/schema=<SCHEMA_VERSION>/ticker=<TICKER>/date=<YYYY-MM-DD>/*.parquet`
+`data/features/schema=<SCHEMA_VERSION>/ticker=<TICKER>/timeframe=<TF>/horizon=<HORIZON_BARS>/date=<YYYY-MM-DD>/*.parquet`
 
 Обязательные идентификаторы:
 
 - `asof_time`
 - `ticker`
 - `timeframe`
+- `horizon_bars`
 - `feature_schema_version`
 
 Обязательное содержимое:
@@ -139,4 +140,3 @@ Backend обязан использовать:
 - `as_of_time`
 - `timeframe`
 - `horizon_bars`
-

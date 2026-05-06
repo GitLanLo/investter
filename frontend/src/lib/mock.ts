@@ -89,6 +89,7 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
       dataset_manifest: "data/datasets/dataset_version=mvp_live_wf_20260409/manifest.json",
       research_summary: "artifacts/research/mvp_live_wf_20260409/ablation_sprint2_richer_modelpack/summary.json",
       calibration_summary: "artifacts/research/mvp_live_wf_20260409/calibration_audit_hgb_core_price_volume/summary.json",
+      grid_matrix: "artifacts/research/sprint7/timeframe_horizon_matrix.json",
     },
     dataset: {
       datasetVersion: "mvp_live_wf_20260409",
@@ -99,6 +100,38 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
       trainRows: 7247,
       valRows: 1535,
       testRows: 1540,
+    },
+    gridMatrix: {
+      status: "completed",
+      gridName: "timeframe_horizon_matrix",
+      timeframes: ["5m", "15m", "1h"],
+      horizons: [6, 12, 24],
+      expectedResultCount: 9,
+      completedResultCount: 9,
+      results: [
+        {
+          status: "completed",
+          timeframe: "15m",
+          horizon: 12,
+          datasetVersion: "sprint7_15m_h12_20260506",
+          rows: 10322,
+          valActionableF1: 0.34,
+          valPrecision: 0.43,
+          valCoverage: 0.31,
+          valEce: 0.18,
+        },
+        {
+          status: "completed",
+          timeframe: "5m",
+          horizon: 12,
+          datasetVersion: "sprint7_5m_h12_20260506",
+          rows: 30966,
+          valActionableF1: 0.29,
+          valPrecision: 0.36,
+          valCoverage: 0.39,
+          valEce: 0.24,
+        },
+      ],
     },
     research: {
       researchCandidate: {

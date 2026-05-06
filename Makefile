@@ -1,4 +1,4 @@
-.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke sprint6-check sprint6-smoke
+.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke sprint6-check sprint6-smoke sprint7-check sprint7-smoke sprint7-research-run
 
 backend-run:
 	cd backend && go run ./cmd/api
@@ -78,3 +78,16 @@ sprint6-smoke: sprint5-smoke
 	curl -fsS -X POST 'http://127.0.0.1:8080/jobs/data-refresh' >/dev/null
 	curl -fsS -X POST 'http://127.0.0.1:8080/jobs/signals/run' >/dev/null
 	curl -fsS 'http://127.0.0.1:8080/jobs/runs?limit=10' >/dev/null
+
+sprint7-check: ml-test backend-test frontend-build sprint7-smoke
+
+sprint7-smoke: sprint6-smoke
+	curl -fsS 'http://127.0.0.1:8080/ml/research/overview' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/research/documents' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/research/overview' | jq -e '.grid_matrix.status == "completed" and (.grid_matrix.results | length) == 9 and ([.grid_matrix.results[] | select(.status != "completed")] | length) == 0' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/research/documents' | jq -e 'any(.items[]; .key == "grid_matrix")' >/dev/null
+	test -f artifacts/research/sprint7/timeframe_horizon_matrix.json
+
+sprint7-research-run:
+	. .venv/bin/activate && cd ml-core && invest-ml raw-coverage-report --data-root ../data --output ../artifacts/research/sprint7/data_coverage.json
+	. .venv/bin/activate && cd ml-core && invest-ml run-research-grid --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/sprint7 --grid-name timeframe_horizon_matrix $$(jq -r '.assets[] | select(.ml_enabled != false) | "--ticker " + .ticker' ../configs/sprint7_universe_v1.json) --factor usdrub --factor brent --factor rtsi --timeframe 5m --timeframe 15m --timeframe 1h --horizon 6 --horizon 12 --horizon 24

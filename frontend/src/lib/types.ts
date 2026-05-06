@@ -68,8 +68,32 @@ export type ResearchOverviewDTO = {
   dataset_manifest?: Record<string, unknown>;
   research_summary?: Record<string, unknown>;
   calibration_summary?: Record<string, unknown>;
+  grid_matrix?: Record<string, unknown>;
   source_paths?: Record<string, string>;
   warnings?: string[];
+};
+
+export type GridMatrixResult = {
+  status: string;
+  timeframe: string;
+  horizon: number;
+  datasetVersion: string;
+  rows: number;
+  valActionableF1?: number;
+  valPrecision?: number;
+  testActionableF1?: number;
+  valCoverage?: number;
+  valEce?: number;
+};
+
+export type GridMatrixSnapshot = {
+  status: string;
+  gridName: string;
+  timeframes: string[];
+  horizons: number[];
+  expectedResultCount: number;
+  completedResultCount: number;
+  results: GridMatrixResult[];
 };
 
 export type ResearchDocumentDTO = {
@@ -325,6 +349,7 @@ export type MLOverview = {
   warnings: string[];
   sourcePaths: Record<string, string>;
   dataset?: DatasetSnapshot;
+  gridMatrix?: GridMatrixSnapshot;
   research?: {
     researchCandidate?: CandidateSnapshot;
     productionCandidate?: CandidateSnapshot;

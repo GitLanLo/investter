@@ -57,9 +57,15 @@ Expand the trading universe to 20-50 liquid instruments and execute a comprehens
 - Futures will not be used as training assets in this sprint (requires rollover policy implementation).
 
 ## Exit Criteria
-- [ ] `configs/sprint7_universe_v1.json` contains 20+ ML-enabled instruments.
-- [ ] Coverage reports exist for every ticker and timeframe.
-- [ ] 9 comparable dataset/research runs are completed.
-- [ ] `docs/ml/sprint7_timeframe_horizon_decision.md` justifies the chosen default.
-- [ ] `make sprint7-check` passes successfully.
-- [ ] Raw data and large artifacts remain excluded from source control.
+- [x] `configs/sprint7_universe_v1.json` contains 20+ ML-enabled instruments.
+- [x] Coverage reports exist for the Sprint 7 data-backed ticker/factor set.
+- [x] 9 comparable dataset/research runs are completed.
+- [x] `docs/ml/sprint7_timeframe_horizon_decision.md` justifies the chosen default.
+- [x] `make sprint7-check` passes successfully.
+- [x] Raw data and large artifacts remain excluded from source control.
+
+## Closure Notes
+
+- Sprint 7 selected `1h` with horizon `24` bars for Sprint 8 neural modeling.
+- `YNDX` is disabled because Tinkoff `FindInstrument` did not resolve it on `TQBR`; 25 assets remain data-backed and ML-enabled.
+- Current coverage warnings are caused by calendar-time gap checks and should become trading-schedule-aware later.
