@@ -7,6 +7,7 @@ import json
 import pandas as pd
 
 from ml_core.datasets.splits import SplitConfig, write_dataset_splits
+from ml_core.datasets.sequences import SequenceDatasetConfig, build_sequence_dataset
 from ml_core.features.build import FeatureBuildConfig, build_feature_frame
 from ml_core.ingest.providers import LocalParquetProvider
 from ml_core.ingest.tinkoff import sync_tinkoff_asset_history, sync_tinkoff_factor_history, sync_tinkoff_universe
@@ -36,6 +37,7 @@ from ml_core.training.research import (
     run_baseline_research,
     run_walk_forward_research,
 )
+from ml_core.training.neural import NeuralTrainingConfig, train_neural_sequence
 
 
 def main() -> None:
@@ -173,6 +175,35 @@ def main() -> None:
     materialize_dataset_cmd.add_argument("--train-ratio", type=float, default=0.7)
     materialize_dataset_cmd.add_argument("--val-ratio", type=float, default=0.15)
     materialize_dataset_cmd.add_argument("--purge-gap-bars", type=int, default=12)
+
+    build_sequence = subparsers.add_parser("build-sequence-dataset")
+    build_sequence.add_argument("--data-root", required=True)
+    build_sequence.add_argument("--output-root", required=True)
+    build_sequence.add_argument("--source-dataset-version", required=True)
+    build_sequence.add_argument("--sequence-dataset-version", required=True)
+    build_sequence.add_argument("--timeframe", required=True)
+    build_sequence.add_argument("--horizon-bars", type=int, required=True)
+    build_sequence.add_argument("--window-bars", type=int, required=True)
+    build_sequence.add_argument("--stride", type=int, default=1)
+    build_sequence.add_argument("--min-coverage-ratio", type=float, default=0.9)
+    build_sequence.add_argument("--ticker", action="append", default=[])
+    build_sequence.add_argument("--feature-col", action="append", default=[])
+    build_sequence.add_argument("--exclude-feature", action="append", default=[])
+
+    train_neural = subparsers.add_parser("train-neural-sequence")
+    train_neural.add_argument("--sequence-root", required=True)
+    train_neural.add_argument("--dataset-version", required=True)
+    train_neural.add_argument("--window", type=int, required=True)
+    train_neural.add_argument("--model-family", default="gru")
+    train_neural.add_argument("--output-root", required=True)
+    train_neural.add_argument("--epochs", type=int, default=50)
+    train_neural.add_argument("--batch-size", type=int, default=64)
+    train_neural.add_argument("--lr", type=float, default=1e-3)
+    train_neural.add_argument("--hidden-size", type=int, default=64)
+    train_neural.add_argument("--num-layers", type=int, default=2)
+    train_neural.add_argument("--dropout", type=float, default=0.2)
+    train_neural.add_argument("--patience", type=int, default=5)
+    train_neural.add_argument("--device", default="cpu")
 
     tinkoff_asset = subparsers.add_parser("tinkoff-sync-asset")
     tinkoff_asset.add_argument("--data-root", required=True)
@@ -464,6 +495,46 @@ def main() -> None:
                 horizon_bars=args.horizon_bars,
             ),
         )
+        return
+
+    if args.command == "build-sequence-dataset":
+        config = SequenceDatasetConfig(
+            data_root=Path(args.data_root),
+            output_root=Path(args.output_root),
+            source_dataset_version=args.source_dataset_version,
+            sequence_dataset_version=args.sequence_dataset_version,
+            timeframe=args.timeframe,
+            horizon_bars=args.horizon_bars,
+            window_bars=args.window_bars,
+            stride=args.stride,
+            min_coverage_ratio=args.min_coverage_ratio,
+            tickers=args.ticker if args.ticker else None,
+            feature_cols=args.feature_col if args.feature_col else None,
+            exclude_cols=args.exclude_feature if args.exclude_feature else None,
+        )
+        manifest = build_sequence_dataset(config)
+        import dataclasses
+        print(json.dumps(dataclasses.asdict(manifest), indent=2, ensure_ascii=False, default=str))
+        return
+
+    if args.command == "train-neural-sequence":
+        config = NeuralTrainingConfig(
+            sequence_root=Path(args.sequence_root),
+            dataset_version=args.dataset_version,
+            window_bars=args.window,
+            output_root=Path(args.output_root),
+            model_family=args.model_family,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            hidden_size=args.hidden_size,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            early_stopping_patience=args.patience,
+            device=args.device,
+        )
+        manifest = train_neural_sequence(config)
+        print(manifest.to_json())
         return
 
     if args.command == "tinkoff-sync-asset":

@@ -1,6 +1,6 @@
 # invest
 
-Рабочий Sprint 7 baseline для `invest`: backend, ML/data core, operator GUI, forward validation, instrument catalog и timeframe/horizon research.
+Рабочий Sprint 8 baseline для `invest`: backend, ML/data core, operator GUI, forward validation, instrument catalog, timeframe/horizon research и neural sequence artifact metadata.
 
 ## Что уже сделано
 
@@ -20,7 +20,8 @@
 - Sprint 5 закрыт; completion note: `docs/sprint5_completion.md`.
 - Sprint 6 закрыт; completion note: `docs/sprint6_completion.md`.
 - Sprint 7 закрыт; plan: `docs/sprint7_plan.md`, decision: `docs/ml/sprint7_timeframe_horizon_decision.md`.
-- Sprint 8 запланирован; detailed plan: `docs/sprint8_plan.md`.
+- Sprint 8 закрыт; detailed plan: `docs/sprint8_plan.md`, report: `docs/ml/baseline_report_sprint8.md`.
+- Sprint 9 запланирован; detailed plan: `docs/sprint9_plan.md`.
 - данные обновлены до `mvp_live_20260422`; активный Sprint 3 policy candidate: `logreg_multiclass` + `identity` calibration, threshold `0.30`, validation run `id=2` в состоянии `shadow_live`; refresh note: `docs/ml/data_refresh_20260422.md`.
 
 ## Структура
@@ -167,12 +168,20 @@ invest-ml run-research-pipeline \
 - coverage note: `docs/ml/sprint7_data_coverage.md`;
 - `make sprint7-check` verifies the matrix artifact through backend API.
 
-## Sprint 8 plan
+## Sprint 8 status
 
 - Sprint 8 plan: `docs/sprint8_plan.md`;
 - selected starting point: `1h`, horizon `24`, 25 TQBR instruments;
-- main deliverable: first neural sequence model plus deployable model manifest;
-- required conclusion: neural candidate, documented rejection, or data-volume blocker backed by metrics.
+- first neural sequence model artifact: `sprint8_gru_1h_h24_w96`;
+- backend model card exposes neural manifest with `runtime_status=metadata_only`;
+- report: `docs/ml/baseline_report_sprint8.md`;
+- `make sprint8-check` passes.
+
+## Sprint 9 plan
+
+- Sprint 9 plan: `docs/sprint9_plan.md`;
+- focus: model activation guards, promotion/rollback, signal events, notification rules, and monitoring;
+- first blocker to handle: neural artifacts are metadata-readable but not executable by backend runtime.
 
 ## Документы
 
@@ -192,11 +201,14 @@ invest-ml run-research-pipeline \
 - `docs/sprint5_plan.md`
 - `docs/sprint7_plan.md`
 - `docs/sprint8_plan.md`
+- `docs/sprint9_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`
 - `docs/ml/baseline_report_sprint1.md`
+- `docs/ml/baseline_report_sprint8.md`
 - `docs/ml/data_refresh_20260422.md`
+- `docs/ml/sprint8_data_readiness.md`
 - `docs/ml/ml_objective_v1.md`
 - `docs/ml/target_engineering_v1.md`
 - `docs/ml/feature_space_v1.md`

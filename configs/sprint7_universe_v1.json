@@ -29,7 +29,7 @@
     { "ticker": "AFLT", "timeframe": "5m", "instrument_kind": "share", "class_code": "TQBR", "name": "Aeroflot", "sector": "Industrials", "liquidity_tier": 2, "ml_enabled": true }
   ],
   "factors": [
-    { "alias": "usdrub", "ticker": "USD000UTSTOM", "timeframe": "5m", "instrument_kind": "currency", "class_code": "CETS" },
+    { "alias": "usdrub", "ticker": "USD000UTSTOM", "timeframe": "5m", "instrument_kind": "currency", "class_code": "CETS", "enabled": false },
     { "alias": "brent", "ticker": "BRM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" },
     { "alias": "rtsi", "ticker": "RIM6", "timeframe": "5m", "instrument_kind": "futures", "class_code": "SPBFUT" }
   ]

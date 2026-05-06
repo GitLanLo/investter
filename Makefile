@@ -1,4 +1,4 @@
-.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke sprint6-check sprint6-smoke sprint7-check sprint7-smoke sprint7-research-run
+.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke sprint6-check sprint6-smoke sprint7-check sprint7-smoke sprint7-research-run sprint8-check sprint8-smoke
 
 backend-run:
 	cd backend && go run ./cmd/api
@@ -91,3 +91,19 @@ sprint7-smoke: sprint6-smoke
 sprint7-research-run:
 	. .venv/bin/activate && cd ml-core && invest-ml raw-coverage-report --data-root ../data --output ../artifacts/research/sprint7/data_coverage.json
 	. .venv/bin/activate && cd ml-core && invest-ml run-research-grid --data-root ../data --dataset-output-root ../data/datasets --research-output-root ../artifacts/research/sprint7 --grid-name timeframe_horizon_matrix $$(jq -r '.assets[] | select(.ml_enabled != false) | "--ticker " + .ticker' ../configs/sprint7_universe_v1.json) --factor usdrub --factor brent --factor rtsi --timeframe 5m --timeframe 15m --timeframe 1h --horizon 6 --horizon 12 --horizon 24
+
+sprint8-check: ml-test backend-test frontend-build sprint8-smoke
+
+sprint8-smoke: sprint7-smoke
+	@echo "Checking Sprint 8 Neural Sequence model artifacts..."
+	test -f data/sequences/dataset_version=sprint8_1h_h24_20260506/window=48/manifest.json
+	test -f data/sequences/dataset_version=sprint8_1h_h24_20260506/window=96/manifest.json
+	jq -e '.feature_count == 48 and .splits.test.windows > 0 and ([.feature_order[] | select(. == "horizon_bars" or . == "move_pct" or . == "barrier_up_price" or . == "barrier_down_price")] | length) == 0' data/sequences/dataset_version=sprint8_1h_h24_20260506/window=48/manifest.json >/dev/null
+	jq -e '.feature_count == 48 and .splits.test.windows > 0 and ([.feature_order[] | select(. == "horizon_bars" or . == "move_pct" or . == "barrier_up_price" or . == "barrier_down_price")] | length) == 0' data/sequences/dataset_version=sprint8_1h_h24_20260506/window=96/manifest.json >/dev/null
+	test -f artifacts/models/sprint8_gru_1h_h24_w96/model.pt
+	test -f artifacts/models/sprint8_gru_1h_h24_w96/model_manifest.json
+	test -f artifacts/models/sprint8_gru_1h_h24_w96/scaler.joblib
+	test -f artifacts/models/sprint8_gru_1h_h24_w96/predictions_test.parquet
+	jq -e '.model_family == "gru" and .input_window_bars == 96 and .input_tensor_shape == [96, 48] and .export_format == "torchscript" and (.metrics.f1_macro | type) == "number"' artifacts/models/sprint8_gru_1h_h24_w96/model_manifest.json >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/models/active' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/ml/models/sprint8_gru_1h_h24_w96' | jq -e '.model_family == "gru" and .input_window_bars == 96 and .runtime_status == "metadata_only"' >/dev/null

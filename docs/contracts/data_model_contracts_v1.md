@@ -93,6 +93,28 @@
 - `purge_gap_bars`
 - `feature_columns`
 
+## Sequence dataset layout
+
+Рекомендуемый layout:
+
+`data/sequences/dataset_version=<VERSION>/window=<WINDOW_BARS>/split=<train|val|test>/*.parquet`
+
+Для каждой sequence сборки дополнительно нужен manifest:
+
+`data/sequences/dataset_version=<VERSION>/window=<WINDOW_BARS>/manifest.json`
+
+Минимальные поля manifest:
+
+- `input_shape`
+- `window_length`
+- `feature_count`
+- `class_mapping`
+- `source_dataset_version`
+- `timeframe`
+- `horizon_bars`
+- `split_counts`
+- `checksums`
+
 ## Model manifest contract
 
 Для каждой deployable модели нужен manifest:
@@ -102,19 +124,24 @@
 Минимальные поля:
 
 - `model_version`
-- `model_type`
-- `task_type`
+- `model_type` / `model_family`
+- `task_type` / `task`
 - `classes`
-- `timeframe`
-- `horizon_bars`
+- `timeframe` / `input_timeframe`
+- `horizon_bars` / `prediction_horizon_bars`
+- `input_window_bars` (for neural sequence models)
+- `input_tensor_shape` (for neural sequence models)
 - `feature_schema_version`
-- `feature_columns`
-- `normalization_artifact_path`
+- `feature_columns` / `feature_order`
+- `normalization_artifact_path` / `normalization`
 - `export_format`
 - `model_artifact_path`
+- `artifact_sha256`
 - `metrics`
-- `decision_threshold`
+- `threshold` / `decision_threshold`
+- `calibration`
 - `created_at`
+- `source_dataset_version`
 
 ## Inference input contract
 

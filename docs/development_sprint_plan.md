@@ -151,7 +151,7 @@ Exit criteria:
 - Job history is visible.
 - Re-running jobs is safe.
 
-## Sprint 7. Dataset Expansion And Timeframe/Horizon Research (Closed)
+## Sprint 7. Dataset Expansion And Timeframe/Horizon Research (Completed)
 
 Goal:
 build enough data and evidence to choose the right timeframe/horizon before neural modeling.
@@ -190,7 +190,7 @@ Closure:
 - Data-backed universe: 25 ML-enabled TQBR instruments.
 - Matrix artifact: `artifacts/research/sprint7/timeframe_horizon_matrix.json`.
 
-## Sprint 8. Neural Model And Deployable Contract (Planned)
+## Sprint 8. Neural Model And Deployable Contract (Closed)
 
 Goal:
 train a first neural sequence model and make it deployable.
@@ -233,10 +233,27 @@ Exit criteria:
 - It beats or clearly fails against the baseline with documented evidence.
 - A deployable artifact and manifest exist.
 
-## Sprint 9. Promotion, Notifications And Monitoring
+Closure:
+
+- Report: `docs/ml/baseline_report_sprint8.md`.
+- Selected artifact: `sprint8_gru_1h_h24_w96`.
+- Runtime status: `metadata_only`.
+- `make sprint8-check` passes.
+
+## Sprint 9. Promotion, Notifications And Monitoring (Planned)
 
 Goal:
 turn validated models/signals into an operator-ready production loop.
+
+Detailed implementation plan:
+
+- `docs/sprint9_plan.md`.
+
+Starting point:
+
+- Sprint 8 neural artifact is readable by backend but not executable in Go runtime yet.
+- Promotion must protect `metadata_only` models from accidental inference.
+- Existing Sprint 4 forward-validation blockers and Sprint 6 job loop are the foundation for promotion and monitoring.
 
 Promotion work:
 

@@ -339,6 +339,29 @@ type jobRunDTO struct {
 	ErrorMessage string         `json:"error_message,omitempty"`
 }
 
+type mlModelManifestDTO struct {
+	ModelVersion              string             `json:"model_version"`
+	ModelType                 string             `json:"model_type"`
+	ModelFamily               string             `json:"model_family"`
+	Classes                   []string           `json:"classes"`
+	Timeframe                 string             `json:"timeframe"`
+	HorizonBars               int                `json:"horizon_bars"`
+	FeatureSchemaVersion      string             `json:"feature_schema_version"`
+	FeatureColumns            []string           `json:"feature_columns"`
+	NormalizationArtifactPath string             `json:"normalization_artifact_path"`
+	ExportFormat              string             `json:"export_format"`
+	ModelArtifactPath         string             `json:"model_artifact_path"`
+	ArtifactSHA256            string             `json:"artifact_sha256"`
+	Metrics                   map[string]float64 `json:"metrics"`
+	DecisionThreshold         float64            `json:"decision_threshold"`
+	Calibration               string             `json:"calibration"`
+	CreatedAt                 string             `json:"created_at"`
+	SourceDatasetVersion      string             `json:"source_dataset_version"`
+	InputWindowBars           int                `json:"input_window_bars,omitempty"`
+	InputTensorShape          []int              `json:"input_tensor_shape,omitempty"`
+	RuntimeStatus             string             `json:"runtime_status"`
+}
+
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 
@@ -365,8 +388,46 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 				"data_refresh_job":    "POST /jobs/data-refresh",
 				"signal_refresh_job":  "POST /jobs/signals/run",
 				"outcome_materialize": "POST /jobs/outcomes/materialize",
+				"ml_models":           "/ml/models/active",
 			},
 		})
+	})
+
+	mux.HandleFunc("/ml/models/active", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		entry, err := deps.Container.Services.Models.GetActive(r.Context())
+		if err != nil {
+			writeError(w, http.StatusNotFound, "active_model_not_found", err.Error(), nil)
+			return
+		}
+		manifest, err := service.LoadManifest(entry.ManifestPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "manifest_load_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toModelManifestDTO(manifest))
+	})
+
+	mux.HandleFunc("/ml/models/{version}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		version := r.PathValue("version")
+		entry, err := deps.Container.Services.Models.GetByVersion(r.Context(), version)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "model_not_found", err.Error(), nil)
+			return
+		}
+		manifest, err := service.LoadManifest(entry.ManifestPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "manifest_load_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toModelManifestDTO(manifest))
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -1652,4 +1713,29 @@ func toInstrumentDTO(inst domain.TinkoffInstrument) instrumentDTO {
 		dto.First1DayCandleDate = inst.First1DayCandleDate.UTC().Format(time.RFC3339)
 	}
 	return dto
+}
+
+func toModelManifestDTO(m domain.ModelManifest) mlModelManifestDTO {
+	return mlModelManifestDTO{
+		ModelVersion:              m.ModelVersion,
+		ModelType:                 m.ModelType,
+		ModelFamily:               m.ModelFamily,
+		Classes:                   m.Classes,
+		Timeframe:                 m.Timeframe,
+		HorizonBars:               m.HorizonBars,
+		FeatureSchemaVersion:      m.FeatureSchemaVersion,
+		FeatureColumns:            m.FeatureColumns,
+		NormalizationArtifactPath: m.NormalizationArtifactPath,
+		ExportFormat:              m.ExportFormat,
+		ModelArtifactPath:         m.ModelArtifactPath,
+		ArtifactSHA256:            m.ArtifactSHA256,
+		Metrics:                   m.Metrics,
+		DecisionThreshold:         m.DecisionThreshold,
+		Calibration:               m.Calibration,
+		CreatedAt:                 m.CreatedAt.UTC().Format(time.RFC3339),
+		SourceDatasetVersion:      m.SourceDatasetVersion,
+		InputWindowBars:           m.InputWindowBars,
+		InputTensorShape:          m.InputTensorShape,
+		RuntimeStatus:             m.RuntimeStatus,
+	}
 }

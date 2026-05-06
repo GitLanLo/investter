@@ -490,6 +490,7 @@ export type WorkspaceShellData = {
   latestSignals: SignalCard[];
   mlOverview: MLOverview;
   productionPolicy: ProductionPolicySnapshot;
+  activeModel?: MLModelManifest;
   policyValidationRuns: PolicyValidationRun[];
   policyShadowSummary?: PolicyShadowSummary;
   policyOutcomeSummary?: PolicyOutcomeSummary;
@@ -571,4 +572,48 @@ export type SchedulerInfo = {
 
 export type SchedulersResponse = {
   schedulers: SchedulerInfo[];
+};
+
+export type MLModelManifestDTO = {
+  model_version: string;
+  model_type: string;
+  classes: string[];
+  timeframe: string;
+  horizon_bars: number;
+  feature_schema_version: string;
+  feature_columns: string[];
+  normalization_artifact_path: string;
+  export_format: string;
+  model_artifact_path: string;
+  artifact_sha256: string;
+  metrics: Record<string, number>;
+  decision_threshold: number;
+  calibration: string;
+  created_at: string;
+  source_dataset_version: string;
+  input_window_bars?: number;
+  input_tensor_shape?: number[];
+  runtime_status: string;
+};
+
+export type MLModelManifest = {
+  modelVersion: string;
+  modelType: string;
+  classes: string[];
+  timeframe: string;
+  horizonBars: number;
+  featureSchemaVersion: string;
+  featureColumns: string[];
+  normalizationArtifactPath: string;
+  exportFormat: string;
+  modelArtifactPath: string;
+  artifactSha256: string;
+  metrics: Record<string, number>;
+  decisionThreshold: number;
+  calibration: string;
+  createdAt: string;
+  sourceDatasetVersion: string;
+  inputWindowBars?: number;
+  inputTensorShape?: number[];
+  runtimeStatus: string;
 };

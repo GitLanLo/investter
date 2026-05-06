@@ -40,9 +40,10 @@ import type {
   ScenarioSnapshot,
   SignalCard,
   WorkspaceShellData,
+  MLModelManifest,
 } from "./lib/types";
 
-const shellNav = ["Overview", "Signal Lab", "Research Board", "Policy Gate", "Artifact Feed"];
+const shellNav = ["Overview", "Signal Lab", "Research Board", "Model Card", "Policy Gate", "Artifact Feed"];
 const factorPalette = ["#d06931", "#1e7b89", "#5b7c2d", "#8d4fd1"];
 const emptyAssets: AssetCard[] = [];
 const emptySignals: SignalCard[] = [];
@@ -168,6 +169,7 @@ export function App() {
   const policyShadowSummary = shellData?.policyShadowSummary;
   const policyOutcomeSummary = shellData?.policyOutcomeSummary;
   const policyOutcomeHistory = shellData?.policyOutcomeHistory ?? [];
+  const activeModel = shellData?.activeModel;
   const jobScheduler = shellData?.jobScheduler;
   const jobRuns = shellData?.jobRuns ?? [];
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
@@ -453,9 +455,9 @@ export function App() {
                   <span>{asset.venue}</span>
                 </button>
               ))}
-              <button 
-                className="asset-pill asset-pill-add" 
-                type="button" 
+              <button
+                className="asset-pill asset-pill-add"
+                type="button"
                 onClick={() => setShowSearchPanel(true)}
               >
                 <strong>+ Search</strong>
@@ -608,6 +610,25 @@ export function App() {
             <CandidateCard title="Production gate" candidate={overview?.research?.productionCandidate} />
             <CandidateCard title="Calibration gate" candidate={overview?.calibration?.productionCandidate} />
           </div>
+        </section>
+
+        <section className="card" id="model-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Runtime artifact</p>
+              <h3>Active model deployment card</h3>
+            </div>
+            {activeModel && (
+              <span className={`badge badge-${activeModel.runtimeStatus === "available" ? "good" : "warn"}`}>
+                {activeModel.runtimeStatus}
+              </span>
+            )}
+          </div>
+          {activeModel ? (
+            <ModelCard model={activeModel} />
+          ) : (
+            <p className="empty-note">No active model metadata available from registry.</p>
+          )}
         </section>
 
         <section className="card policy-validation-panel" id="policy-gate">
@@ -2713,7 +2734,7 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
       setDropdownOpen(false);
       return;
     }
-    
+
     const timer = setTimeout(async () => {
       setLoading(true);
       setError(null);
@@ -2756,20 +2777,20 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
         </header>
         <div className="search-modal-body">
           <div className="autocomplete-container">
-            <input 
-              type="text" 
-              placeholder="Start typing ticker, figi, or name..." 
-              value={query} 
+            <input
+              type="text"
+              placeholder="Start typing ticker, figi, or name..."
+              value={query}
               onChange={e => {
                 setQuery(e.target.value);
                 setSelected(null);
-              }} 
+              }}
               onFocus={() => { if (results.length > 0) setDropdownOpen(true); }}
               autoFocus
               className="autocomplete-input"
             />
             {loading && <div className="autocomplete-spinner">Loading...</div>}
-            
+
             {dropdownOpen && (
               <div className="autocomplete-dropdown">
                 {results.length > 0 && (
@@ -2784,9 +2805,9 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
                 )}
                 <div className="autocomplete-list">
                   {filtered.map(r => (
-                    <div 
-                      key={r.uid} 
-                      className="autocomplete-item" 
+                    <div
+                      key={r.uid}
+                      className="autocomplete-item"
                       onClick={() => {
                         setSelected(r);
                         setDropdownOpen(false);
@@ -2812,7 +2833,7 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
           </div>
 
           {error && <p className="console-error">{error}</p>}
-          
+
           {selected && (
             <div className="search-preview">
               <h4>{selected.ticker}</h4>
@@ -2824,7 +2845,7 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
                 <Metric label="Lot" value={String(selected.lot)} />
                 <Metric label="Currency" value={selected.currency} />
               </div>
-              
+
               <div className="support-status">
                 <p className="eyebrow">Support status</p>
                 <div className="support-badges">
@@ -2922,6 +2943,48 @@ function SchedulersCard({ schedulers }: { schedulers: SchedulerInfo[] }) {
             </p>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ModelCard({ model }: { model: MLModelManifest }) {
+  return (
+    <div className="model-card-layout">
+      <div className="model-card-main">
+        <div className="model-card-header">
+          <div>
+            <h4>{model.modelVersion}</h4>
+            <p className="signal-row-meta">
+              {model.modelType} · {model.exportFormat} · {model.calibration} calibration
+            </p>
+          </div>
+          <div className="model-card-status">
+            <span className="signal-row-meta">Created {formatDate(model.createdAt)}</span>
+          </div>
+        </div>
+        <div className="model-card-grid">
+          <Metric label="Timeframe" value={model.timeframe} />
+          <Metric label="Horizon" value={`${model.horizonBars} bars`} />
+          <Metric label="Features" value={String(model.featureColumns.length)} />
+          <Metric label="Threshold" value={formatProbability(model.decisionThreshold)} />
+          {model.inputWindowBars && <Metric label="Sequence window" value={`${model.inputWindowBars} bars`} />}
+          {model.inputTensorShape && (
+            <Metric label="Input shape" value={`[${model.inputTensorShape.join(", ")}]`} />
+          )}
+        </div>
+        <div className="model-card-artifacts">
+          <p className="signal-row-meta">Artifact path: <code>{model.modelArtifactPath}</code></p>
+          <p className="signal-row-meta">SHA256: <code style={{ fontSize: "10px" }}>{model.artifactSha256}</code></p>
+        </div>
+      </div>
+      <div className="model-card-metrics">
+        <p className="candidate-title">Deployment metrics</p>
+        <div className="model-card-metrics-grid">
+          {Object.entries(model.metrics).map(([key, value]) => (
+            <Metric key={key} label={key} value={formatMetric(value, 4)} />
+          ))}
+        </div>
       </div>
     </div>
   );

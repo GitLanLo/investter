@@ -516,6 +516,7 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
     { name: "watchlist_refresh", enabled: false, interval: "30m0s", limit: 50 },
     { name: "watchlist_signal_refresh", enabled: false, interval: "30m0s" },
   ],
+  activeModel: undefined,
 };
 
 const mockWorkbenchByAsset = new Map<string, AssetWorkbenchData>(

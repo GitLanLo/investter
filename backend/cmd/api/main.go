@@ -13,6 +13,7 @@ import (
 
 	"invest/backend/internal/app"
 	"invest/backend/internal/config"
+	"invest/backend/internal/domain"
 	"invest/backend/internal/httpserver"
 	"invest/backend/internal/service"
 	"invest/backend/internal/storage"
@@ -41,7 +42,21 @@ func main() {
 		context.Background(),
 		filepath.Join(cfg.MLModelRoot, "baseline_stub_v1", "model_manifest.json"),
 	); err != nil {
-		log.Fatalf("bootstrap model init failed: %v", err)
+		log.Printf("warning: baseline bootstrap model init failed: %v", err)
+	}
+	if err := container.Services.Models.Register(
+		context.Background(),
+		domain.ModelRegistryEntry{
+			ModelVersion:         "sprint8_gru_1h_h24_w96",
+			ModelType:            "gru",
+			Status:               domain.ModelStatusActive,
+			Timeframe:            "1h",
+			HorizonBars:          24,
+			FeatureSchemaVersion: "sprint8",
+			ManifestPath:         filepath.Join(cfg.MLModelRoot, "sprint8_gru_1h_h24_w96", "model_manifest.json"),
+		},
+	); err != nil {
+		log.Printf("warning: sprint8 model registration failed: %v", err)
 	}
 	if cfg.OutcomeSchedulerEnabled {
 		service.NewOutcomeMaterializationScheduler(

@@ -42,6 +42,8 @@ import type {
   FreshnessSummaryDTO,
   SchedulerInfo,
   SchedulersResponse,
+  MLModelManifest,
+  MLModelManifestDTO,
 } from "./types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
@@ -63,12 +65,13 @@ export function formatMetric(value: number | undefined, digits = 3): string {
 
 export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
   try {
-    const [documents, assets, signals, overview, productionPolicy] = await Promise.all([
+    const [documents, assets, signals, overview, productionPolicy, activeModel] = await Promise.all([
       fetchJson<ResearchDocumentsResponseDTO>("/ml/research/documents"),
       fetchJson<{ items: AssetDTO[] }>("/assets"),
       fetchJson<{ items: SignalDTO[] }>("/signals/latest?limit=12"),
       fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
       fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
+      fetchJson<MLModelManifestDTO>("/ml/models/active").catch(() => undefined),
     ]);
     const [validationRuns, shadowSummary, outcomeSummary, outcomeHistory, jobs, scheduler, freshness, schedulers] = await Promise.all([
       fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
@@ -87,6 +90,7 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       latestSignals: signals.items.map(mapSignal),
       mlOverview: mapResearchOverview(overview),
       productionPolicy: mapProductionPolicy(productionPolicy),
+      activeModel: activeModel ? mapMLModelManifest(activeModel) : undefined,
       policyValidationRuns: validationRuns.items.map(mapPolicyValidationRun),
       policyShadowSummary: shadowSummary ? mapPolicyShadowSummary(shadowSummary) : undefined,
       policyOutcomeSummary: outcomeSummary ? mapPolicyOutcomeSummary(outcomeSummary) : undefined,
@@ -754,5 +758,29 @@ function mapFreshnessItem(dto: FreshnessItemDTO): FreshnessItem {
     signalFresh: dto.signal_fresh,
     staleReason: dto.stale_reason,
     modelSupported: dto.model_supported,
+  };
+}
+
+function mapMLModelManifest(dto: MLModelManifestDTO): MLModelManifest {
+  return {
+    modelVersion: dto.model_version,
+    modelType: dto.model_type,
+    classes: dto.classes,
+    timeframe: dto.timeframe,
+    horizonBars: dto.horizon_bars,
+    featureSchemaVersion: dto.feature_schema_version,
+    featureColumns: dto.feature_columns,
+    normalizationArtifactPath: dto.normalization_artifact_path,
+    exportFormat: dto.export_format,
+    modelArtifactPath: dto.model_artifact_path,
+    artifactSha256: dto.artifact_sha256,
+    metrics: dto.metrics,
+    decisionThreshold: dto.decision_threshold,
+    calibration: dto.calibration,
+    createdAt: dto.created_at,
+    sourceDatasetVersion: dto.source_dataset_version,
+    inputWindowBars: dto.input_window_bars,
+    inputTensorShape: dto.input_tensor_shape,
+    runtimeStatus: dto.runtime_status,
   };
 }

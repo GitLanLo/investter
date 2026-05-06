@@ -79,18 +79,31 @@ type ModelRegistryEntry struct {
 type ModelManifest struct {
 	ModelVersion              string             `json:"model_version"`
 	ModelType                 string             `json:"model_type"`
+	ModelFamily               string             `json:"model_family"`
 	TaskType                  string             `json:"task_type"`
+	Task                      string             `json:"task"`
 	Classes                   []string           `json:"classes"`
 	Timeframe                 string             `json:"timeframe"`
+	InputTimeframe            string             `json:"input_timeframe"`
 	HorizonBars               int                `json:"horizon_bars"`
+	PredictionHorizonBars     int                `json:"prediction_horizon_bars"`
 	FeatureSchemaVersion      string             `json:"feature_schema_version"`
 	FeatureColumns            []string           `json:"feature_columns"`
+	FeatureOrder              []string           `json:"feature_order"`
 	NormalizationArtifactPath string             `json:"normalization_artifact_path"`
+	Normalization             string             `json:"normalization"`
 	ExportFormat              string             `json:"export_format"`
 	ModelArtifactPath         string             `json:"model_artifact_path"`
+	ArtifactSHA256            string             `json:"artifact_sha256"`
 	Metrics                   map[string]float64 `json:"metrics"`
 	DecisionThreshold         float64            `json:"decision_threshold"`
+	Threshold                 float64            `json:"threshold"`
+	Calibration               string             `json:"calibration"`
 	CreatedAt                 time.Time          `json:"created_at"`
+	SourceDatasetVersion      string             `json:"source_dataset_version"`
+	InputWindowBars           int                `json:"input_window_bars"`
+	InputTensorShape          []int              `json:"input_tensor_shape"`
+	RuntimeStatus             string             `json:"runtime_status,omitempty"`
 }
 
 type SignalClassProbabilities struct {
