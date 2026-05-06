@@ -18,6 +18,8 @@
 - Sprint 3 закрыт; completion note: `docs/sprint3_completion.md`.
 - Sprint 4 закрыт; completion note: `docs/sprint4_completion.md`.
 - Sprint 5 закрыт; completion note: `docs/sprint5_completion.md`.
+- Sprint 6 закрыт; completion note: `docs/sprint6_completion.md`.
+- Sprint 7 активен; plan: `docs/sprint7_plan.md`.
 - данные обновлены до `mvp_live_20260422`; активный Sprint 3 policy candidate: `logreg_multiclass` + `identity` calibration, threshold `0.30`, validation run `id=2` в состоянии `shadow_live`; refresh note: `docs/ml/data_refresh_20260422.md`.
 
 ## Структура
@@ -144,18 +146,22 @@ invest-ml run-research-pipeline \
 - persisted matured outcomes in `signal_outcomes`;
 - `make sprint4-check` extends Sprint 3 smoke with realised policy outcome metrics.
 
-## Sprint 5 status
+## Sprint 6 status
 
-- Sprint 5 plan: `docs/sprint5_plan.md`;
-- Sprint 5 closure note: `docs/sprint5_completion.md`;
-- instrument catalog endpoints:
-  - `GET /instruments/search`
-  - `GET /instruments/{uid}`;
-- enriched watchlist contract:
-  - `GET /watchlist`
-  - `POST /watchlist`;
-- asset catalog migration `005_instrument_catalog.sql`;
-- `make sprint5-check` extends Sprint 4 smoke with watchlist/instrument catalog checks.
+- Sprint 6 closure note: `docs/sprint6_completion.md`;
+- Sprint 6 plan: `docs/sprint6_plan.md` (if applicable);
+- Incremental market data refresh (Tinkoff API ingest in Go);
+- Market schedule awareness (stale data checks skip closed markets);
+- Partial failure support and robust job semantics;
+- Frontend jobs panel displays failed job reasons and retry actions;
+- `make sprint6-check` passes.
+
+## Sprint 7 status
+
+- Sprint 7 plan: `docs/sprint7_plan.md`;
+- Expand universe to 20-50 liquid instruments;
+- Execute research grid across timeframes (5m, 15m, 1h) and horizons (6, 12, 24);
+- Determine optimal timeframe/horizon default for production.
 
 ## Документы
 

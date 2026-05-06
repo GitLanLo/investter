@@ -117,7 +117,7 @@ Exit criteria:
 - Unsupported instruments do not accidentally receive ML signals.
 - `make sprint5-check` passes.
 
-## Sprint 6. Scheduled Data Refresh And Watchlist Live Loop
+## Sprint 6. Scheduled Data Refresh And Watchlist Live Loop (Completed)
 
 Goal:
 make watchlist instruments refresh and signal generation repeatable instead of manual.
@@ -151,7 +151,7 @@ Exit criteria:
 - Job history is visible.
 - Re-running jobs is safe.
 
-## Sprint 7. Dataset Expansion And Timeframe/Horizon Research
+## Sprint 7. Dataset Expansion And Timeframe/Horizon Research (Active)
 
 Goal:
 build enough data and evidence to choose the right timeframe/horizon before neural modeling.
