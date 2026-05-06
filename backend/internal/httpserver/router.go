@@ -24,6 +24,13 @@ type healthResponse struct {
 	Checks    map[string]string `json:"checks,omitempty"`
 }
 
+type apiIndexResponse struct {
+	Service  string            `json:"service"`
+	Env      string            `json:"env"`
+	Frontend string            `json:"frontend"`
+	Links    map[string]string `json:"links"`
+}
+
 type Dependencies struct {
 	DB        *sql.DB
 	Container app.Container
@@ -333,6 +340,33 @@ type jobRunDTO struct {
 
 func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		writeJSON(w, http.StatusOK, apiIndexResponse{
+			Service:  "invest-backend",
+			Env:      cfg.AppEnv,
+			Frontend: "http://localhost:5173/",
+			Links: map[string]string{
+				"health":              "/health",
+				"ready":               "/ready",
+				"assets":              "/assets",
+				"watchlist":           "/watchlist",
+				"freshness":           "/watchlist/freshness",
+				"jobs":                "/jobs/runs?limit=10",
+				"data_refresh_job":    "POST /jobs/data-refresh",
+				"signal_refresh_job":  "POST /jobs/signals/run",
+				"outcome_materialize": "POST /jobs/outcomes/materialize",
+			},
+		})
+	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
@@ -1106,6 +1140,141 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, toJobRunDTO(item))
 	})
+
+	// --- Sprint 6: Watchlist Live Loop Endpoints ---
+
+	mux.HandleFunc("/jobs/data-refresh", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.WatchlistRefresh == nil {
+			writeError(w, http.StatusServiceUnavailable, "watchlist_refresh_unavailable", "watchlist refresh service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		item, err := deps.Container.Services.WatchlistRefresh.RunWatchlistRefresh(r.Context(), 50)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "watchlist_refresh_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toJobRunDTO(item))
+	})
+
+	mux.HandleFunc("/jobs/signals/run", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.WatchlistRefresh == nil {
+			writeError(w, http.StatusServiceUnavailable, "watchlist_signal_refresh_unavailable", "watchlist signal refresh service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		item, err := deps.Container.Services.WatchlistRefresh.RunWatchlistSignalRefresh(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "watchlist_signal_refresh_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toJobRunDTO(item))
+	})
+
+	mux.HandleFunc("/jobs/watchlist/refresh", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.WatchlistRefresh == nil {
+			writeError(w, http.StatusServiceUnavailable, "watchlist_refresh_unavailable", "watchlist refresh service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		limit := 50
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", "limit must be an integer", nil)
+				return
+			}
+			limit = parsed
+		}
+		item, err := deps.Container.Services.WatchlistRefresh.RunWatchlistRefresh(r.Context(), limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "watchlist_refresh_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toJobRunDTO(item))
+	})
+
+	mux.HandleFunc("/jobs/watchlist/signals", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.WatchlistRefresh == nil {
+			writeError(w, http.StatusServiceUnavailable, "watchlist_signal_refresh_unavailable", "watchlist signal refresh service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		item, err := deps.Container.Services.WatchlistRefresh.RunWatchlistSignalRefresh(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "watchlist_signal_refresh_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toJobRunDTO(item))
+	})
+
+	mux.HandleFunc("/watchlist/freshness", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.WatchlistRefresh == nil {
+			writeError(w, http.StatusServiceUnavailable, "freshness_unavailable", "watchlist refresh service is not configured", nil)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		summary, err := deps.Container.Services.WatchlistRefresh.GetFreshness(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "freshness_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
+	})
+
+	mux.HandleFunc("/jobs/schedulers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		type schedulerInfo struct {
+			Name     string `json:"name"`
+			Enabled  bool   `json:"enabled"`
+			Interval string `json:"interval"`
+			Limit    int    `json:"limit,omitempty"`
+		}
+		out := struct {
+			Schedulers []schedulerInfo `json:"schedulers"`
+		}{
+			Schedulers: []schedulerInfo{
+				{
+					Name:     "outcome_materialize",
+					Enabled:  cfg.OutcomeSchedulerEnabled,
+					Interval: cfg.OutcomeSchedulerInterval.String(),
+					Limit:    cfg.OutcomeSchedulerLimit,
+				},
+				{
+					Name:     "watchlist_refresh",
+					Enabled:  cfg.WatchlistRefreshSchedulerEnabled,
+					Interval: cfg.WatchlistRefreshInterval.String(),
+					Limit:    cfg.WatchlistRefreshLimit,
+				},
+				{
+					Name:     "watchlist_signal_refresh",
+					Enabled:  cfg.WatchlistSignalSchedulerEnabled,
+					Interval: cfg.WatchlistSignalInterval.String(),
+				},
+			},
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	// --- End Sprint 6 endpoints ---
 
 	mux.HandleFunc("/instruments/search", func(w http.ResponseWriter, r *http.Request) {
 		if deps.Container.Services.Instruments == nil {

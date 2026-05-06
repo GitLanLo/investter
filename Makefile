@@ -1,4 +1,4 @@
-.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke
+.PHONY: backend-run backend-build backend-test backend-migrate compose-up compose-up-all compose-down ml-install ml-test frontend-install frontend-build frontend-run sprint2-check sprint2-smoke sprint3-check sprint3-smoke sprint4-check sprint4-smoke sprint5-check sprint5-smoke sprint6-check sprint6-smoke
 
 backend-run:
 	cd backend && go run ./cmd/api
@@ -69,3 +69,12 @@ sprint5-smoke: sprint4-smoke
 	curl -fsS 'http://127.0.0.1:8080/watchlist' >/dev/null
 	curl -fsS -X POST 'http://127.0.0.1:8080/watchlist' -H 'Content-Type: application/json' -d '{"asset_id":"SBER","position":1}' >/dev/null
 	if [ -n "$$TINKOFF_INVEST_TOKEN" ]; then curl -fsS 'http://127.0.0.1:8080/instruments/search?query=sber' >/dev/null; fi
+
+sprint6-check: backend-test frontend-build sprint6-smoke
+
+sprint6-smoke: sprint5-smoke
+	curl -fsS 'http://127.0.0.1:8080/watchlist/freshness' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/jobs/schedulers' >/dev/null
+	curl -fsS -X POST 'http://127.0.0.1:8080/jobs/data-refresh' >/dev/null
+	curl -fsS -X POST 'http://127.0.0.1:8080/jobs/signals/run' >/dev/null
+	curl -fsS 'http://127.0.0.1:8080/jobs/runs?limit=10' >/dev/null

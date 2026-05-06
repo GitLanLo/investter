@@ -22,6 +22,39 @@ import (
 	"invest/backend/internal/service"
 )
 
+func TestRootIndex(t *testing.T) {
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB:        &sql.DB{},
+		Container: app.Container{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status for GET /: %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var body apiIndexResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode root index: %v", err)
+	}
+	if body.Service != "invest-backend" {
+		t.Fatalf("unexpected service: %s", body.Service)
+	}
+	if body.Links["health"] != "/health" {
+		t.Fatalf("expected health link, got %+v", body.Links)
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, "/not-found", nil)
+	missingResp := httptest.NewRecorder()
+	router.ServeHTTP(missingResp, missingReq)
+	if missingResp.Code != http.StatusNotFound {
+		t.Fatalf("unexpected status for unknown path: %d", missingResp.Code)
+	}
+}
+
 func TestAnalysisEndpoints(t *testing.T) {
 	manifestPath := writeTestManifest(t)
 
@@ -940,6 +973,49 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 	}
 }
 
+func TestSprint6Endpoints(t *testing.T) {
+	assetRepo := &testAssetRepo{
+		assets: map[string]domain.Asset{
+			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m", IsActive: true},
+		},
+	}
+	watchlistRepo := &testWatchlistRepo{
+		items: []domain.WatchlistItem{{AssetID: "SBER"}},
+	}
+	jobRepo := &testJobRunRepo{}
+	instruments := &testInstrumentService{
+		items: map[string]domain.TinkoffInstrument{
+			"uid-sber": {UID: "uid-sber", Ticker: "SBER", Name: "Sberbank"},
+		},
+	}
+
+	refreshSvc := service.NewWatchlistRefreshService(
+		watchlistRepo, assetRepo, &testMarketDataRepo{}, jobRepo, &testSignalRepo{},
+		nil, instruments, nil,
+	)
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				WatchlistRefresh: refreshSvc,
+			},
+		},
+	})
+
+	// Test aliases
+	endpoints := []string{"/jobs/data-refresh", "/jobs/signals/run"}
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodPost, ep, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Errorf("unexpected status for %s: %d body=%s", ep, resp.Code, resp.Body.String())
+		}
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
 	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
 		DB:        &sql.DB{},
@@ -1043,6 +1119,14 @@ func (s *testInstrumentService) GetInstrumentByUID(_ context.Context, uid string
 		return domain.TinkoffInstrument{}, sql.ErrNoRows
 	}
 	return item, nil
+}
+
+func (s *testInstrumentService) GetCandles(ctx context.Context, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
+	return nil, nil
+}
+
+func (s *testInstrumentService) IsMarketOpen(ctx context.Context, exchange string) (bool, error) {
+	return true, nil
 }
 
 type testModelRepo struct {
@@ -1206,6 +1290,19 @@ func (r *testMarketDataRepo) ListCandles(
 
 func (r *testMarketDataRepo) ListFactors(context.Context, string, time.Time, time.Time) ([]domain.FactorBar, error) {
 	return r.factors, nil
+}
+
+func (r *testMarketDataRepo) AppendCandles(ctx context.Context, ticker string, timeframe string, candles []domain.Candle) error {
+	if r.candles == nil {
+		r.candles = make(map[string][]domain.Candle)
+	}
+	r.candles[ticker] = append(r.candles[ticker], candles...)
+	return nil
+}
+
+func (r *testMarketDataRepo) AppendFactors(ctx context.Context, alias string, timeframe string, factors []domain.FactorBar) error {
+	r.factors = append(r.factors, factors...)
+	return nil
 }
 
 func (r *testSignalOutcomeRepo) Upsert(_ context.Context, outcome domain.SignalOutcome) (domain.SignalOutcome, error) {

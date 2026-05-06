@@ -16,6 +16,8 @@ type AssetRepository interface {
 type MarketDataRepository interface {
 	ListCandles(ctx context.Context, ticker string, timeframe string, from time.Time, to time.Time, limit int) ([]domain.Candle, error)
 	ListFactors(ctx context.Context, timeframe string, from time.Time, to time.Time) ([]domain.FactorBar, error)
+	AppendCandles(ctx context.Context, ticker string, timeframe string, candles []domain.Candle) error
+	AppendFactors(ctx context.Context, alias string, timeframe string, factors []domain.FactorBar) error
 }
 
 type WatchlistRepository interface {

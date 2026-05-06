@@ -232,8 +232,8 @@ a {
   justify-content: flex-start;
   gap: 20px;
   min-width: 0;
-  height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .hero {
@@ -370,8 +370,8 @@ a {
   line-height: 1.05;
   max-width: 100%;
   min-height: 1.1em;
-  overflow: visible;
-  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .metric-warn {
@@ -404,25 +404,30 @@ a {
   min-height: 420px;
 }
 
-.intelligence-panel,
-.policy-validation-panel,
-.artifact-board {
+.intelligence-panel {
   grid-column: span 7;
+  min-height: 420px;
+}
+
+.policy-validation-panel {
+  grid-column: 1 / -1;
+  min-height: 420px;
+}
+
+.artifact-board {
+  grid-column: span 8;
   min-height: 420px;
 }
 
 .dataset-panel,
 .calibration-board {
+  grid-column: span 4;
   min-height: 420px;
 }
 
 .signal-feed {
   grid-column: span 8;
   min-height: 300px;
-}
-
-.artifact-board {
-  grid-column: span 8;
 }
 
 .section-heading {
@@ -2551,3 +2556,182 @@ body::before {
   }
 }
 
+/* ── Sprint 6: Freshness panel ── */
+
+.freshness-panel {
+  grid-column: 1 / -1;
+  min-height: 360px;
+}
+
+.freshness-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.freshness-summary-col {
+  display: grid;
+  gap: 16px;
+}
+
+.freshness-kpi-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(86px, 1fr);
+}
+
+.freshness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.freshness-items-col {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.freshness-row {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.freshness-row:hover {
+  border-color: rgba(28, 118, 133, 0.28);
+}
+
+.freshness-row-stale {
+  background: rgba(177, 76, 59, 0.05);
+  border-color: rgba(177, 76, 59, 0.14);
+}
+
+.freshness-row-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.freshness-row-header strong {
+  font-size: 1.02rem;
+}
+
+.freshness-row-name {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.freshness-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.freshness-row-reason {
+  margin: 0;
+  color: var(--down);
+  font-size: 0.82rem;
+  font-style: italic;
+  max-width: 50ch;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.freshness-row-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.badge-neutral {
+  background: rgba(89, 104, 117, 0.12);
+  color: var(--muted);
+}
+
+.scheduler-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.scheduler-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.scheduler-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scheduler-row-header strong {
+  font-size: 0.92rem;
+  text-transform: capitalize;
+}
+
+.job-status-running {
+  color: var(--accent-2);
+  font-weight: 800;
+}
+
+.job-status-succeeded {
+  color: var(--up);
+  font-weight: 800;
+}
+
+.job-status-failed {
+  color: var(--down);
+  font-weight: 800;
+}
+
+.job-error-text {
+  color: var(--down);
+  font-size: 0.84rem;
+  margin-top: 4px;
+}
+
+.job-retry-button {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.job-retry-button:hover {
+  background: #fff;
+  border-color: var(--accent);
+}
+
+.policy-job-info {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .freshness-layout {
+    grid-template-columns: 1fr;
+  }
+  .freshness-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

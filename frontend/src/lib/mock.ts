@@ -462,6 +462,27 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
       ].join("\n"),
     },
   ],
+  freshness: {
+    generatedAt: "2026-04-10T10:25:00Z",
+    totalItems: 5,
+    freshData: 3,
+    staleData: 2,
+    freshSignals: 2,
+    staleSignals: 3,
+    watchlistOnly: 2,
+    items: [
+      { assetId: "SBER", ticker: "SBER", name: "Sberbank", dataFresh: true, signalFresh: true, modelSupported: true },
+      { assetId: "GAZP", ticker: "GAZP", name: "Gazprom", dataFresh: true, signalFresh: true, modelSupported: true },
+      { assetId: "LKOH", ticker: "LKOH", name: "Lukoil", dataFresh: true, signalFresh: false, staleReason: "no signals generated", modelSupported: true },
+      { assetId: "NVTK", ticker: "NVTK", name: "Novatek", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false },
+      { assetId: "MOEX", ticker: "MOEX", name: "Moscow Exchange", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false },
+    ],
+  },
+  schedulers: [
+    { name: "outcome_materialize", enabled: true, interval: "15m0s", limit: 1000 },
+    { name: "watchlist_refresh", enabled: false, interval: "30m0s", limit: 50 },
+    { name: "watchlist_signal_refresh", enabled: false, interval: "30m0s" },
+  ],
 };
 
 const mockWorkbenchByAsset = new Map<string, AssetWorkbenchData>(

@@ -21,6 +21,13 @@
 - `TINKOFF_INVEST_TARGET`
   - `prod`
   - `sandbox`
+- `ML_UNIVERSE_CONFIG`
+  - путь к universe JSON для backend watchlist refresh factor aliases;
+  - по умолчанию `../configs/mvp_universe_v1.json` при локальном запуске backend.
+- `TINKOFF_CA_CERT_FILE`
+  - optional PEM bundle with an additional trusted root CA for T-Bank API TLS validation;
+  - use this instead of disabling certificate verification when the environment does not trust the Russian Trusted Root chain.
+  - Docker Compose defaults to `certs/russian_trusted_root_ca.pem`, fingerprint `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`.
 - `TINKOFF_INVEST_TIMEOUT_SECONDS`
 - `TINKOFF_INVEST_USER_AGENT`
 

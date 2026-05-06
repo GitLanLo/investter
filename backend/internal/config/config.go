@@ -19,12 +19,20 @@ type Config struct {
 	MLDataRoot                 string
 	MLModelRoot                string
 	MLResearchRoot             string
+	MLUniverseConfigPath       string
 	OutcomeSchedulerEnabled    bool
 	OutcomeSchedulerInterval   time.Duration
 	OutcomeSchedulerLimit      int
 	OutcomeSchedulerRunOnStart bool
 	TinkoffInvestToken         string
 	TinkoffInvestTarget        string
+	TinkoffCACertFile          string
+
+	WatchlistRefreshSchedulerEnabled bool
+	WatchlistRefreshInterval         time.Duration
+	WatchlistRefreshLimit            int
+	WatchlistSignalSchedulerEnabled  bool
+	WatchlistSignalInterval          time.Duration
 }
 
 func Load() Config {
@@ -41,12 +49,20 @@ func Load() Config {
 		MLDataRoot:                 getEnv("ML_DATA_ROOT", "../data"),
 		MLModelRoot:                getEnv("ML_MODEL_ROOT", "../artifacts/models"),
 		MLResearchRoot:             getEnv("ML_RESEARCH_ROOT", "../artifacts/research"),
+		MLUniverseConfigPath:       getEnv("ML_UNIVERSE_CONFIG", "../configs/mvp_universe_v1.json"),
 		OutcomeSchedulerEnabled:    getEnvBool("OUTCOME_SCHEDULER_ENABLED", false),
 		OutcomeSchedulerInterval:   getEnvDuration("OUTCOME_SCHEDULER_INTERVAL", 15*time.Minute),
 		OutcomeSchedulerLimit:      getEnvInt("OUTCOME_SCHEDULER_LIMIT", 1000),
 		OutcomeSchedulerRunOnStart: getEnvBool("OUTCOME_SCHEDULER_RUN_ON_START", false),
 		TinkoffInvestToken:         getEnv("TINKOFF_INVEST_TOKEN", ""),
 		TinkoffInvestTarget:        getEnv("TINKOFF_INVEST_TARGET", "sandbox"),
+		TinkoffCACertFile:          getEnv("TINKOFF_CA_CERT_FILE", ""),
+
+		WatchlistRefreshSchedulerEnabled: getEnvBool("WATCHLIST_REFRESH_SCHEDULER_ENABLED", false),
+		WatchlistRefreshInterval:         getEnvDuration("WATCHLIST_REFRESH_INTERVAL", 30*time.Minute),
+		WatchlistRefreshLimit:            getEnvInt("WATCHLIST_REFRESH_LIMIT", 50),
+		WatchlistSignalSchedulerEnabled:  getEnvBool("WATCHLIST_SIGNAL_SCHEDULER_ENABLED", false),
+		WatchlistSignalInterval:          getEnvDuration("WATCHLIST_SIGNAL_INTERVAL", 30*time.Minute),
 	}
 }
 

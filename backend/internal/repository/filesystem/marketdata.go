@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -176,6 +177,131 @@ func (r *MarketDataRepository) ListFactors(
 	})
 
 	return items, nil
+}
+
+func (r *MarketDataRepository) AppendCandles(
+	ctx context.Context,
+	ticker string,
+	timeframe string,
+	candles []domain.Candle,
+) error {
+	if len(candles) == 0 {
+		return nil
+	}
+
+	// Group candles by date
+	byDate := make(map[string][]candleRow)
+	for _, c := range candles {
+		rowTicker := c.Ticker
+		if rowTicker == "" {
+			rowTicker = ticker
+		}
+		rowTimeframe := c.Timeframe
+		if rowTimeframe == "" {
+			rowTimeframe = timeframe
+		}
+		dateStr := c.Timestamp.UTC().Format("2006-01-02")
+		byDate[dateStr] = append(byDate[dateStr], candleRow{
+			Timestamp:  c.Timestamp.UTC(),
+			Open:       c.Open,
+			High:       c.High,
+			Low:        c.Low,
+			Close:      c.Close,
+			Volume:     c.Volume,
+			Ticker:     rowTicker,
+			Timeframe:  rowTimeframe,
+			Source:     c.Source,
+			IngestedAt: c.IngestedAt.UTC(),
+		})
+	}
+
+	for dateStr, rows := range byDate {
+		dir := filepath.Join(
+			r.dataRoot,
+			"raw",
+			"candles",
+			"ticker="+ticker,
+			"timeframe="+timeframe,
+			"date="+dateStr,
+		)
+
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+
+		filename := fmt.Sprintf("batch_%d.parquet", time.Now().UnixNano())
+		path := filepath.Join(dir, filename)
+
+		if err := parquet.WriteFile[candleRow](path, rows); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *MarketDataRepository) AppendFactors(
+	ctx context.Context,
+	alias string,
+	timeframe string,
+	factors []domain.FactorBar,
+) error {
+	if len(factors) == 0 {
+		return nil
+	}
+
+	byDate := make(map[string][]factorRow)
+	for _, f := range factors {
+		rowAlias := f.Factor
+		if rowAlias == "" {
+			rowAlias = alias
+		}
+		rowTimeframe := f.Timeframe
+		if rowTimeframe == "" {
+			rowTimeframe = timeframe
+		}
+		dateStr := f.Timestamp.UTC().Format("2006-01-02")
+		byDate[dateStr] = append(byDate[dateStr], factorRow{
+			Timestamp:  f.Timestamp.UTC(),
+			Open:       f.Open,
+			High:       f.High,
+			Low:        f.Low,
+			Close:      f.Close,
+			Volume:     f.Volume,
+			Factor:     rowAlias,
+			Timeframe:  rowTimeframe,
+			Source:     f.Source,
+			IngestedAt: f.IngestedAt.UTC(),
+		})
+	}
+
+	for dateStr, rows := range byDate {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		dir := filepath.Join(
+			r.dataRoot,
+			"raw",
+			"factors",
+			"factor="+alias,
+			"timeframe="+timeframe,
+			"date="+dateStr,
+		)
+
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+
+		filename := fmt.Sprintf("batch_%d.parquet", time.Now().UnixNano())
+		path := filepath.Join(dir, filename)
+
+		if err := parquet.WriteFile[factorRow](path, rows); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func listPartitionFiles(root string, from time.Time, to time.Time) ([]string, error) {

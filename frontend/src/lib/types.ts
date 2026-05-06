@@ -472,6 +472,8 @@ export type WorkspaceShellData = {
   jobScheduler?: JobSchedulerStatus;
   jobRuns: JobRun[];
   artifactDocuments: ArtifactDocument[];
+  freshness?: FreshnessSummary;
+  schedulers: SchedulerInfo[];
   generatedFrom: "api" | "mock";
 };
 
@@ -486,4 +488,62 @@ export type AssetWorkbenchRequest = {
   from?: string;
   to?: string;
   limit?: number;
+};
+
+// Sprint 6: Freshness types
+export type FreshnessItemDTO = {
+  asset_id: string;
+  ticker: string;
+  name: string;
+  last_candle_at?: string;
+  last_signal_at?: string;
+  data_fresh: boolean;
+  signal_fresh: boolean;
+  stale_reason?: string;
+  model_supported: boolean;
+};
+
+export type FreshnessSummaryDTO = {
+  generated_at: string;
+  total_items: number;
+  fresh_data: number;
+  stale_data: number;
+  fresh_signals: number;
+  stale_signals: number;
+  watchlist_only: number;
+  items: FreshnessItemDTO[];
+};
+
+export type FreshnessItem = {
+  assetId: string;
+  ticker: string;
+  name: string;
+  lastCandleAt?: string;
+  lastSignalAt?: string;
+  dataFresh: boolean;
+  signalFresh: boolean;
+  staleReason?: string;
+  modelSupported: boolean;
+};
+
+export type FreshnessSummary = {
+  generatedAt: string;
+  totalItems: number;
+  freshData: number;
+  staleData: number;
+  freshSignals: number;
+  staleSignals: number;
+  watchlistOnly: number;
+  items: FreshnessItem[];
+};
+
+export type SchedulerInfo = {
+  name: string;
+  enabled: boolean;
+  interval: string;
+  limit?: number;
+};
+
+export type SchedulersResponse = {
+  schedulers: SchedulerInfo[];
 };

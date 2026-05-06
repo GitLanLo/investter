@@ -13,6 +13,7 @@ Backend foundation для Sprint 1.
 - реализованы `GET /assets`, `GET /assets/{id}/candles`, `GET /assets/{id}/factors`, `GET /watchlist`, `POST /watchlist`;
 - реализованы `POST /analysis/run`, `GET /signals/latest`;
 - есть bootstrap model manifest registration из `artifacts/models/baseline_stub_v1/model_manifest.json`;
+- watchlist data refresh использует `ML_UNIVERSE_CONFIG` для factor aliases и пишет догруженные factors в `ML_DATA_ROOT`;
 - подготовлен Dockerfile для локальной сборки;
 - сервис подключён к PostgreSQL и пишет `signal_runs`.
 

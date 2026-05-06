@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"log"
 
 	"invest/backend/internal/config"
 	"invest/backend/internal/repository/filesystem"
@@ -22,9 +23,20 @@ func NewContainer(db *sql.DB, cfg config.Config) Container {
 	outcomeRepo := postgres.NewSignalOutcomeRepository(db)
 	jobRepo := postgres.NewJobRunRepository(db)
 	policyRepo := postgres.NewPolicyValidationRunRepository(db)
-	tinkoffAdapter := service.NewTinkoffAdapter(cfg.TinkoffInvestToken, cfg.TinkoffInvestTarget)
+	tinkoffAdapter := service.NewTinkoffAdapter(cfg.TinkoffInvestToken, cfg.TinkoffInvestTarget, cfg.TinkoffCACertFile)
 
-	return Container{
-		Services: service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo, outcomeRepo, jobRepo, policyRepo, cfg.MLDataRoot, cfg.MLResearchRoot, tinkoffAdapter),
+	svcs := service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo, outcomeRepo, jobRepo, policyRepo, cfg.MLDataRoot, cfg.MLResearchRoot, tinkoffAdapter)
+
+	watchlistRefresh := service.NewWatchlistRefreshService(
+		watchlistRepo, assetRepo, marketDataRepo, jobRepo, signalRepo,
+		svcs.Analysis, tinkoffAdapter, log.Default(),
+	)
+	if factorSpecs, err := service.LoadUniverseFactorSpecs(cfg.MLUniverseConfigPath); err == nil {
+		watchlistRefresh = watchlistRefresh.WithFactorSpecs(factorSpecs)
+	} else {
+		log.Printf("watchlist refresh factor specs unavailable: %v", err)
 	}
+	svcs.WatchlistRefresh = watchlistRefresh
+
+	return Container{Services: svcs}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"invest/backend/internal/domain"
 	"invest/backend/internal/repository"
@@ -10,23 +11,26 @@ import (
 type InstrumentService interface {
 	FindInstrument(ctx context.Context, query string) ([]domain.TinkoffInstrument, error)
 	GetInstrumentByUID(ctx context.Context, uid string) (domain.TinkoffInstrument, error)
+	GetCandles(ctx context.Context, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error)
+	IsMarketOpen(ctx context.Context, exchange string) (bool, error)
 }
 
 type Services struct {
-	Assets      *AssetService
-	MarketData  *MarketDataService
-	Watchlist   *WatchlistService
-	Models      *ModelRegistryService
-	Analysis    *AnalysisService
-	Research    *ResearchArtifactsService
-	Policy      *PolicyValidationService
-	Jobs        *JobService
-	Instruments InstrumentService
+	Assets           *AssetService
+	MarketData       *MarketDataService
+	Watchlist        *WatchlistService
+	Models           *ModelRegistryService
+	Analysis         *AnalysisService
+	Research         *ResearchArtifactsService
+	Policy           *PolicyValidationService
+	Jobs             *JobService
+	WatchlistRefresh *WatchlistRefreshService
+	Instruments      InstrumentService
 }
 
 func NewServices(
 	assetRepo repository.AssetRepository,
-	marketDataRepo repository.MarketDataRepository,
+	marketData repository.MarketDataRepository,
 	watchlistRepo repository.WatchlistRepository,
 	modelRepo repository.ModelRegistryRepository,
 	signalRepo repository.SignalRunRepository,
@@ -38,13 +42,12 @@ func NewServices(
 	instruments InstrumentService,
 ) Services {
 	research := NewResearchArtifactsService(mlDataRoot, mlResearchRoot)
-	policy := NewPolicyValidationService(policyRepo, research, signalRepo)
-	if assetRepo != nil && marketDataRepo != nil {
-		policy = policy.WithOutcomeData(assetRepo, marketDataRepo, outcomeRepo)
-	}
+	policy := NewPolicyValidationService(policyRepo, research, signalRepo).
+		WithOutcomeData(assetRepo, marketData, outcomeRepo)
+
 	return Services{
 		Assets:      NewAssetService(assetRepo),
-		MarketData:  NewMarketDataService(assetRepo, marketDataRepo),
+		MarketData:  NewMarketDataService(assetRepo, marketData),
 		Watchlist:   NewWatchlistService(watchlistRepo),
 		Models:      NewModelRegistryService(modelRepo),
 		Analysis:    NewAnalysisService(assetRepo, modelRepo, signalRepo, research),

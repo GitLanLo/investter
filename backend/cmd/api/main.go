@@ -52,6 +52,23 @@ func main() {
 			log.Default(),
 		).Start(rootCtx)
 	}
+	if cfg.WatchlistRefreshSchedulerEnabled && container.Services.WatchlistRefresh != nil {
+		service.NewWatchlistRefreshScheduler(
+			container.Services.WatchlistRefresh,
+			cfg.WatchlistRefreshInterval,
+			cfg.WatchlistRefreshLimit,
+			log.Default(),
+		).Start(rootCtx)
+		log.Printf("watchlist refresh scheduler enabled (interval=%s, limit=%d)", cfg.WatchlistRefreshInterval, cfg.WatchlistRefreshLimit)
+	}
+	if cfg.WatchlistSignalSchedulerEnabled && container.Services.WatchlistRefresh != nil {
+		service.NewWatchlistSignalScheduler(
+			container.Services.WatchlistRefresh,
+			cfg.WatchlistSignalInterval,
+			log.Default(),
+		).Start(rootCtx)
+		log.Printf("watchlist signal scheduler enabled (interval=%s)", cfg.WatchlistSignalInterval)
+	}
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddress(),

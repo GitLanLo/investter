@@ -36,6 +36,12 @@ import type {
   SignalCard,
   SignalDTO,
   WorkspaceShellData,
+  FreshnessItem,
+  FreshnessItemDTO,
+  FreshnessSummary,
+  FreshnessSummaryDTO,
+  SchedulerInfo,
+  SchedulersResponse,
 } from "./types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
@@ -64,13 +70,15 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
       fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
     ]);
-    const [validationRuns, shadowSummary, outcomeSummary, outcomeHistory, jobs, scheduler] = await Promise.all([
+    const [validationRuns, shadowSummary, outcomeSummary, outcomeHistory, jobs, scheduler, freshness, schedulers] = await Promise.all([
       fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
       fetchJson<PolicyShadowSummaryDTO>("/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
       fetchJson<PolicyOutcomeSummaryDTO>("/ml/policy/outcomes?limit=1000").catch(() => undefined),
       fetchJson<{ items: PolicyOutcomeRecordDTO[] }>("/ml/policy/outcomes/history?limit=12").catch(() => ({ items: [] })),
-      fetchJson<{ items: JobRunDTO[] }>("/jobs/runs?limit=6").catch(() => ({ items: [] })),
+      fetchJson<{ items: JobRunDTO[] }>("/jobs/runs?limit=12").catch(() => ({ items: [] })),
       fetchJson<JobSchedulerStatusDTO>("/jobs/scheduler").catch(() => undefined),
+      fetchJson<FreshnessSummaryDTO>("/watchlist/freshness").catch(() => undefined),
+      fetchJson<SchedulersResponse>("/jobs/schedulers").catch(() => undefined),
     ]);
 
     return {
@@ -86,6 +94,8 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       jobScheduler: scheduler ? mapJobSchedulerStatus(scheduler) : undefined,
       jobRuns: jobs.items.map(mapJobRun),
       artifactDocuments: documents.items.map(mapResearchDocument),
+      freshness: freshness ? mapFreshnessSummary(freshness) : undefined,
+      schedulers: schedulers?.schedulers ?? [],
     };
   } catch {
     return mockWorkspaceShellData;
@@ -421,7 +431,24 @@ function mapJobSchedulerStatus(dto: JobSchedulerStatusDTO): JobSchedulerStatus {
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`);
   if (!response.ok) {
-    throw new Error(`request failed for ${path}: ${response.status}`);
+    let errMsg = `request failed for ${path}: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      if (errorData && errorData.error && typeof errorData.error === "object") {
+        const nestedMsg = errorData.error.message || errorData.error.code;
+        if (nestedMsg) errMsg += ` - ${nestedMsg}`;
+      } else if (errorData && errorData.message) {
+        errMsg += ` - ${errorData.message}`;
+      } else if (errorData && typeof errorData.error === "string") {
+        errMsg += ` - ${errorData.error}`;
+      }
+    } catch {
+      try {
+        const textData = await response.text();
+        if (textData) errMsg += ` - ${textData}`;
+      } catch {}
+    }
+    throw new Error(errMsg);
   }
   return response.json() as Promise<T>;
 }
@@ -643,5 +670,56 @@ function mapInstrument(dto: InstrumentDTO): InstrumentCard {
     apiTradeAvailable: dto.api_trade_available,
     first1MinCandleDate: dto.first_1min_candle_date,
     first1DayCandleDate: dto.first_1day_candle_date,
+  };
+}
+
+// Sprint 6: Freshness & Watchlist Job API
+
+export async function triggerWatchlistRefresh(): Promise<JobRun> {
+  const response = await fetch(`${apiBaseUrl}/jobs/data-refresh`, { method: "POST" });
+  if (!response.ok) throw new Error(`watchlist refresh failed: ${response.status}`);
+  return mapJobRun((await response.json()) as JobRunDTO);
+}
+
+export async function triggerWatchlistSignalRefresh(): Promise<JobRun> {
+  const response = await fetch(`${apiBaseUrl}/jobs/signals/run`, { method: "POST" });
+  if (!response.ok) throw new Error(`watchlist signal refresh failed: ${response.status}`);
+  return mapJobRun((await response.json()) as JobRunDTO);
+}
+
+export async function loadFreshness(): Promise<FreshnessSummary> {
+  const dto = await fetchJson<FreshnessSummaryDTO>("/watchlist/freshness");
+  return mapFreshnessSummary(dto);
+}
+
+export async function loadSchedulers(): Promise<SchedulerInfo[]> {
+  const dto = await fetchJson<SchedulersResponse>("/jobs/schedulers");
+  return dto.schedulers;
+}
+
+function mapFreshnessSummary(dto: FreshnessSummaryDTO): FreshnessSummary {
+  return {
+    generatedAt: dto.generated_at,
+    totalItems: dto.total_items,
+    freshData: dto.fresh_data,
+    staleData: dto.stale_data,
+    freshSignals: dto.fresh_signals,
+    staleSignals: dto.stale_signals,
+    watchlistOnly: dto.watchlist_only,
+    items: dto.items.map(mapFreshnessItem),
+  };
+}
+
+function mapFreshnessItem(dto: FreshnessItemDTO): FreshnessItem {
+  return {
+    assetId: dto.asset_id,
+    ticker: dto.ticker,
+    name: dto.name,
+    lastCandleAt: dto.last_candle_at,
+    lastSignalAt: dto.last_signal_at,
+    dataFresh: dto.data_fresh,
+    signalFresh: dto.signal_fresh,
+    staleReason: dto.stale_reason,
+    modelSupported: dto.model_supported,
   };
 }

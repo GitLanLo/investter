@@ -14,6 +14,8 @@ import {
   updatePolicyValidationRun,
   searchInstruments,
   addInstrumentToWatchlist,
+  triggerWatchlistRefresh,
+  triggerWatchlistSignalRefresh,
 } from "./lib/api";
 import type {
   ArtifactDocument,
@@ -23,6 +25,8 @@ import type {
   CandidateSnapshot,
   CandleBar,
   FactorPoint,
+  FreshnessItem,
+  FreshnessSummary,
   InstrumentCard,
   PolicyOutcomeSummary,
   PolicyOutcomeRecord,
@@ -31,6 +35,7 @@ import type {
   JobSchedulerStatus,
   PolicyShadowSummary,
   ProductionPolicySnapshot,
+  SchedulerInfo,
   ScenarioSnapshot,
   SignalCard,
   WorkspaceShellData,
@@ -80,6 +85,8 @@ export function App() {
   const [policyTransitionPendingId, setPolicyTransitionPendingId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [watchlistRefreshPending, setWatchlistRefreshPending] = useState(false);
+  const [watchlistSignalPending, setWatchlistSignalPending] = useState(false);
 
   const deferredAssetId = useDeferredValue(selectedAssetId);
 
@@ -163,6 +170,8 @@ export function App() {
   const jobScheduler = shellData?.jobScheduler;
   const jobRuns = shellData?.jobRuns ?? [];
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
+  const freshness = shellData?.freshness;
+  const schedulers = shellData?.schedulers ?? [];
   const baseCandles = workbenchData?.candles ?? emptyCandles;
   const baseFactors = workbenchData?.factors ?? emptyFactors;
   const selectedSignalHistory = workbenchData?.signalHistory ?? emptySignals;
@@ -317,6 +326,36 @@ export function App() {
       setActionError(error instanceof Error ? error.message : "outcome materialization failed");
     } finally {
       setPolicyOutcomeJobPending(false);
+    }
+  }
+
+  async function handleWatchlistRefresh() {
+    if (shellData?.generatedFrom === "mock") return;
+    setWatchlistRefreshPending(true);
+    setActionError(null);
+    try {
+      await triggerWatchlistRefresh();
+      const refreshedShell = await loadWorkspaceShell();
+      startTransition(() => setShellData(refreshedShell));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "watchlist refresh failed");
+    } finally {
+      setWatchlistRefreshPending(false);
+    }
+  }
+
+  async function handleWatchlistSignalRefresh() {
+    if (shellData?.generatedFrom === "mock") return;
+    setWatchlistSignalPending(true);
+    setActionError(null);
+    try {
+      await triggerWatchlistSignalRefresh();
+      const refreshedShell = await loadWorkspaceShell();
+      startTransition(() => setShellData(refreshedShell));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "watchlist signal refresh failed");
+    } finally {
+      setWatchlistSignalPending(false);
     }
   }
 
@@ -608,7 +647,13 @@ export function App() {
               </button>
               <PolicySchedulerCard scheduler={jobScheduler} />
               <PolicyOutcomeHistoryCard items={policyOutcomeHistory} />
-              <PolicyJobsCard jobs={jobRuns} />
+              <PolicyJobsCard
+                jobs={jobRuns}
+                disabled={shellData?.generatedFrom === "mock"}
+                onRetryRefresh={handleWatchlistRefresh}
+                onRetrySignals={handleWatchlistSignalRefresh}
+                onRetryOutcomes={handleRunOutcomeMaterializationJob}
+              />
             </div>
             <div className="policy-run-list">
               {policyValidationRuns.length ? (
@@ -712,6 +757,62 @@ export function App() {
             {selectedSignalHistory.map((signal, index) => (
               <SignalHistoryRow key={signal.id} signal={signal} active={index === 0} />
             ))}
+          </div>
+        </section>
+
+        <section className="card freshness-panel" id="watchlist-status">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Watchlist live loop</p>
+              <h3>Data freshness & scheduler status</h3>
+            </div>
+            <span className="section-note">
+              {freshness ? `${freshness.totalItems} instruments tracked` : "loading"}
+            </span>
+          </div>
+          <div className="freshness-layout">
+            <div className="freshness-summary-col">
+              {freshness ? (
+                <div className="freshness-kpi-grid">
+                  <Metric label="Total" value={String(freshness.totalItems)} />
+                  <Metric label="Fresh data" value={String(freshness.freshData)} tone="good" />
+                  <Metric label="Stale data" value={String(freshness.staleData)} tone={freshness.staleData > 0 ? "warn" : "good"} />
+                  <Metric label="Fresh signals" value={String(freshness.freshSignals)} tone="good" />
+                  <Metric label="Stale signals" value={String(freshness.staleSignals)} tone={freshness.staleSignals > 0 ? "warn" : "good"} />
+                  <Metric label="Watchlist-only" value={String(freshness.watchlistOnly)} />
+                </div>
+              ) : (
+                <p className="empty-note">Freshness data unavailable.</p>
+              )}
+              <div className="freshness-actions">
+                <button
+                  className="action-button"
+                  type="button"
+                  onClick={() => { void handleWatchlistRefresh(); }}
+                  disabled={watchlistRefreshPending || shellData?.generatedFrom === "mock"}
+                >
+                  {watchlistRefreshPending ? "Refreshing data..." : "Refresh watchlist data"}
+                </button>
+                <button
+                  className="action-button"
+                  type="button"
+                  onClick={() => { void handleWatchlistSignalRefresh(); }}
+                  disabled={watchlistSignalPending || shellData?.generatedFrom === "mock"}
+                >
+                  {watchlistSignalPending ? "Generating signals..." : "Generate watchlist signals"}
+                </button>
+              </div>
+              <SchedulersCard schedulers={schedulers} />
+            </div>
+            <div className="freshness-items-col">
+              {freshness?.items.length ? (
+                freshness.items.map((item) => (
+                  <FreshnessRow key={item.assetId} item={item} />
+                ))
+              ) : (
+                <p className="empty-note">No watchlist instruments.</p>
+              )}
+            </div>
           </div>
         </section>
       </main>
@@ -1200,12 +1301,24 @@ function PolicyOutcomeSummaryCard({ summary }: { summary?: PolicyOutcomeSummary 
   );
 }
 
-function PolicyJobsCard({ jobs }: { jobs: JobRun[] }) {
+function PolicyJobsCard({
+  jobs,
+  disabled,
+  onRetryRefresh,
+  onRetrySignals,
+  onRetryOutcomes
+}: {
+  jobs: JobRun[];
+  disabled?: boolean;
+  onRetryRefresh: () => Promise<void>;
+  onRetrySignals: () => Promise<void>;
+  onRetryOutcomes: () => Promise<void>;
+}) {
   if (!jobs.length) {
     return (
       <div className="shadow-summary-card">
         <p className="shadow-summary-title">Recent jobs</p>
-        <p className="empty-note">No materialization jobs yet.</p>
+        <p className="empty-note">No background jobs yet.</p>
       </div>
     );
   }
@@ -1217,23 +1330,55 @@ function PolicyJobsCard({ jobs }: { jobs: JobRun[] }) {
         <p className="signal-row-meta">{jobs.length} tracked backend runs</p>
       </div>
       <div className="policy-job-list">
-        {jobs.map((job) => (
-          <div key={job.id} className="policy-job-row">
-            <div>
+        {jobs.map((job) => {
+          const failedCount = getNumericMetric(job.payload.failed);
+          const processedCount = job.payload.total_instruments ?? job.payload.total_items;
+
+          return (
+            <div key={job.id} className="policy-job-row">
+            <div className="policy-job-info">
               <p className="signal-row-title">
-                {job.jobType} · {job.status}
+                {job.jobType.replace(/_/g, " ")} · <span className={`job-status-${job.status}`}>{job.status}</span>
               </p>
               <p className="signal-row-meta">
                 {formatDate(job.startedAt)}
                 {job.finishedAt ? ` → ${formatDate(job.finishedAt)}` : ""}
               </p>
+              {job.errorMessage && (
+                <p className="job-error-text">{job.errorMessage}</p>
+              )}
             </div>
             <div className="policy-job-meta">
-              <span>matured {formatUnknownMetric(job.payload.matured_signals)}</span>
-              <span>pending {formatUnknownMetric(job.payload.pending_signals)}</span>
+              {job.jobType === "outcome_materialize" ? (
+                <>
+                  <span>matured {formatUnknownMetric(job.payload.matured_signals)}</span>
+                  <span>pending {formatUnknownMetric(job.payload.pending_signals)}</span>
+                </>
+              ) : (
+                <>
+                  <span>processed {formatUnknownMetric(processedCount)}</span>
+                  {failedCount > 0 && (
+                    <span className="job-error-text">failed {failedCount}</span>
+                  )}
+                </>
+              )}
+              {job.status === "failed" && !disabled && (
+                <button
+                  className="job-retry-button"
+                  type="button"
+                  onClick={() => {
+                    if (job.jobType === "watchlist_refresh" || job.jobType === "data-refresh") onRetryRefresh();
+                    else if (job.jobType === "watchlist_signal_refresh" || job.jobType === "signals/run") onRetrySignals();
+                    else if (job.jobType === "outcome_materialize") onRetryOutcomes();
+                  }}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -2424,6 +2569,10 @@ function formatUnknownMetric(value: unknown) {
   return typeof value === "number" ? String(value) : "n/a";
 }
 
+function getNumericMetric(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function formatRange(candles: CandleBar[]) {
   if (!candles.length) {
     return "n/a";
@@ -2607,6 +2756,82 @@ function InstrumentSearchPanel({ onClose, onAdded }: { onClose: () => void; onAd
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FreshnessRow({ item }: { item: FreshnessItem }) {
+  const dataStatus = item.dataFresh ? "fresh" : "stale";
+  const signalStatus = item.modelSupported
+    ? item.signalFresh ? "fresh" : "stale"
+    : "n/a";
+
+  return (
+    <div className={`freshness-row ${!item.dataFresh ? "freshness-row-stale" : ""}`}>
+      <div className="freshness-row-header">
+        <strong>{item.ticker}</strong>
+        <span className="freshness-row-name">{item.name}</span>
+      </div>
+      <div className="freshness-row-badges">
+        <span className={`badge badge-${dataStatus === "fresh" ? "good" : "warn"}`}>
+          data: {dataStatus}
+        </span>
+        <span className={`badge badge-${signalStatus === "fresh" ? "good" : signalStatus === "stale" ? "warn" : "neutral"}`}>
+          signal: {signalStatus}
+        </span>
+        {item.modelSupported && (
+          <span className="badge badge-good">ML</span>
+        )}
+        {!item.modelSupported && (
+          <span className="badge badge-neutral">watchlist-only</span>
+        )}
+      </div>
+      {item.staleReason && (
+        <p className="freshness-row-reason">{item.staleReason}</p>
+      )}
+      <div className="freshness-row-times">
+        {item.lastCandleAt && (
+          <span className="signal-row-meta">candle: {formatDate(item.lastCandleAt)}</span>
+        )}
+        {item.lastSignalAt && (
+          <span className="signal-row-meta">signal: {formatDate(item.lastSignalAt)}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SchedulersCard({ schedulers }: { schedulers: SchedulerInfo[] }) {
+  if (!schedulers.length) {
+    return (
+      <div className="shadow-summary-card">
+        <p className="shadow-summary-title">Schedulers</p>
+        <p className="empty-note">Scheduler status unavailable.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shadow-summary-card">
+      <div>
+        <p className="shadow-summary-title">All schedulers</p>
+        <p className="signal-row-meta">{schedulers.filter((s) => s.enabled).length} of {schedulers.length} active</p>
+      </div>
+      <div className="scheduler-list">
+        {schedulers.map((s) => (
+          <div key={s.name} className="scheduler-row">
+            <div className="scheduler-row-header">
+              <strong>{s.name.replace(/_/g, " ")}</strong>
+              <span className={`badge badge-${s.enabled ? "good" : "neutral"}`}>
+                {s.enabled ? "active" : "off"}
+              </span>
+            </div>
+            <p className="signal-row-meta">
+              interval: {s.interval}{s.limit ? ` · limit: ${s.limit}` : ""}
+            </p>
+          </div>
+        ))}
       </div>
     </div>
   );
