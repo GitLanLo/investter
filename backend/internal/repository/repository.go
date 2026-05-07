@@ -31,6 +31,7 @@ type ModelRegistryRepository interface {
 	GetActive(ctx context.Context) (domain.ModelRegistryEntry, error)
 	GetByVersion(ctx context.Context, version string) (domain.ModelRegistryEntry, error)
 	Register(ctx context.Context, entry domain.ModelRegistryEntry) error
+	Activate(ctx context.Context, version string) error
 }
 
 type SignalRunRepository interface {
@@ -40,9 +41,29 @@ type SignalRunRepository interface {
 	ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalRun, error)
 }
 
+type SignalEventRepository interface {
+	Create(ctx context.Context, event domain.SignalEvent) (domain.SignalEvent, error)
+	Upsert(ctx context.Context, event domain.SignalEvent) (domain.SignalEvent, error)
+	ListLatest(ctx context.Context, limit int) ([]domain.SignalEvent, error)
+	ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error)
+}
+
 type SignalOutcomeRepository interface {
 	Upsert(ctx context.Context, outcome domain.SignalOutcome) (domain.SignalOutcome, error)
 	ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalOutcome, error)
+}
+
+type NotificationRepository interface {
+	ListRules(ctx context.Context) ([]domain.NotificationRule, error)
+	ListActiveRules(ctx context.Context) ([]domain.NotificationRule, error)
+	GetRuleByID(ctx context.Context, id int64) (domain.NotificationRule, error)
+	CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error)
+	UpdateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error)
+	DeleteRule(ctx context.Context, id int64) error
+
+	CreateEvent(ctx context.Context, event domain.NotificationEvent) (domain.NotificationEvent, error)
+	ListLatestEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error)
+	GetLatestEventForRule(ctx context.Context, ruleID int64) (domain.NotificationEvent, error)
 }
 
 type JobRunRepository interface {
@@ -53,6 +74,9 @@ type JobRunRepository interface {
 
 type PolicyValidationRunRepository interface {
 	Create(ctx context.Context, run domain.PolicyValidationRun) (domain.PolicyValidationRun, error)
+	GetByID(ctx context.Context, id int64) (domain.PolicyValidationRun, error)
 	ListLatest(ctx context.Context, limit int) ([]domain.PolicyValidationRun, error)
 	UpdateDecisionState(ctx context.Context, id int64, decisionState string, notes string) (domain.PolicyValidationRun, error)
+	DemoteCurrentAndPromote(ctx context.Context, targetRunID int64, demoteReason string, log domain.PolicyPromotionLog) error
+	LogPromotion(ctx context.Context, log domain.PolicyPromotionLog) error
 }

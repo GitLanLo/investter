@@ -1,6 +1,6 @@
 # Sprint 9: Promotion, Notifications And Monitoring
 
-Status: planned.
+Status: completed.
 
 ## Objective
 
@@ -13,6 +13,7 @@ Sprint 9 starts from:
 - selected ML configuration: timeframe `1h`, horizon `24`, window `96`;
 - existing forward validation/outcome endpoints from Sprint 4;
 - existing data refresh and signal jobs from Sprint 6.
+- test matrix: `docs/sprint9_test_plan.md`.
 
 ## Non-Goals
 
@@ -44,6 +45,13 @@ Files:
 - `backend/internal/service/analysis_test.go`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
+
+Tests:
+
+- Keep `TestLoadManifest_RuntimeStatusMapping` green for `available`, `metadata_only`, and `unavailable`.
+- Add activation tests for blocking `metadata_only` models and activating available models.
+- Add analysis tests that prove explicit model requests never silently fall back to another model.
+- Add router tests for activation blocker payloads.
 
 Suggested endpoints:
 
@@ -89,6 +97,12 @@ Files:
 - `backend/internal/service/policy_promotion_test.go`
 - `backend/internal/httpserver/router_test.go`
 
+Tests:
+
+- Add service tests for approve, promote, blocked promote, archive previous active, rollback, and promotion log persistence.
+- Add router tests for approve/promote/rollback endpoints and blocker responses.
+- Add repository tests for promotion log ordering and previous-active lookup.
+
 Suggested endpoints:
 
 - `POST /ml/policy/validation-runs/{id}/approve`
@@ -130,6 +144,13 @@ Files:
 - `backend/internal/service/signal_events.go`
 - `backend/internal/httpserver/router.go`
 - `backend/internal/service/signal_events_test.go`
+
+Tests:
+
+- Add service tests for generated/actionable/no-trade/suppressed events.
+- Add idempotency tests by asset, as-of time, model version, and event type.
+- Add router tests for `GET /signals/events`.
+- Add job tests proving scheduled signal runs emit events without duplicates.
 
 Suggested endpoints:
 
@@ -174,6 +195,13 @@ Files:
 - `backend/internal/httpserver/router_test.go`
 - `docs/contracts/api_v1.md`
 
+Tests:
+
+- Add evaluator tests for direction, threshold, policy state, enabled flag, cooldown, and dedupe.
+- Add repository tests for rule CRUD and notification event persistence.
+- Add router tests for notification rule CRUD and notification history.
+- Add mock delivery tests for delivered and failed statuses.
+
 Suggested endpoints:
 
 - `GET /notifications/rules`
@@ -217,6 +245,12 @@ Files:
 - `frontend/src/lib/api.ts`
 - `frontend/src/lib/mock.ts`
 
+Tests:
+
+- Add service tests for `ok`, `warning`, and `critical` summaries.
+- Add stale-data, job-failure, precision-decay, notification-failure, and metadata-only-model cases.
+- Add router tests for `GET /monitoring/summary`.
+
 Suggested endpoint:
 
 - `GET /monitoring/summary`
@@ -254,6 +288,12 @@ Done when:
 - Operator can define notification rules without editing config.
 - Operator can see why promotion or activation is blocked.
 
+Tests:
+
+- Keep `frontend-build` as the required frontend gate unless a test runner is added.
+- Add strict API/mock DTO shape coverage for model activation, promotion blockers, notification rules, signal events, and monitoring summary.
+- Add smoke assertions that the UI-facing APIs return the fields needed by the new panels.
+
 ## Workstream 7: Automation And Smoke Checks
 
 Goal:
@@ -278,6 +318,7 @@ Files:
 - `Makefile`
 - backend service/router tests
 - frontend build checks
+- `docs/sprint9_test_plan.md`
 
 Expected checks:
 
@@ -293,16 +334,23 @@ Done when:
 - `make sprint9-check` fails if promotion, notification, signal-event, or monitoring contracts regress.
 - Smoke validates response shape with `jq`, not only HTTP 200.
 
+Test matrix:
+
+- Detailed test cases and expected file names are tracked in `docs/sprint9_test_plan.md`.
+- Checked-in tests should remain green; add workstream-specific tests together with the implementation they guard.
+- Short-lived red/green TDD is acceptable locally, but incomplete failing tests should not be committed.
+
 ## Implementation Order
 
-1. Harden model runtime/activation semantics.
-2. Add promotion log and rollback service.
-3. Add signal events repository/service and wire analysis/jobs.
-4. Add notification rules CRUD and evaluator with mock delivery.
-5. Add monitoring summary endpoint.
-6. Add frontend controls and monitoring views.
-7. Add `sprint9-check` and strict smoke assertions.
-8. Close Sprint 9 with a completion note and updated contracts.
+1. Keep the baseline Sprint 9 model metadata tests green.
+2. Harden model runtime/activation semantics and add activation tests.
+3. Add promotion log and rollback service with service/router/repository tests.
+4. Add signal events repository/service and wire analysis/jobs with idempotency tests.
+5. Add notification rules CRUD and evaluator with mock delivery tests.
+6. Add monitoring summary endpoint with severity tests.
+7. Add frontend controls and monitoring views with API shape smoke coverage.
+8. Add `sprint9-check` and strict smoke assertions.
+9. Close Sprint 9 with a completion note and updated contracts.
 
 ## Exit Criteria
 

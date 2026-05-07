@@ -46,6 +46,26 @@ func (s *ModelRegistryService) Register(ctx context.Context, entry domain.ModelR
 	return s.repo.Register(ctx, entry)
 }
 
+var ErrModelRuntimeBlocked = errors.New("model activation blocked: runtime is metadata_only or unavailable")
+
+func (s *ModelRegistryService) Activate(ctx context.Context, version string) error {
+	entry, err := s.repo.GetByVersion(ctx, version)
+	if err != nil {
+		return err
+	}
+
+	manifest, err := LoadManifest(entry.ManifestPath)
+	if err != nil {
+		return err
+	}
+
+	if manifest.RuntimeStatus != RuntimeStatusAvailable {
+		return ErrModelRuntimeBlocked
+	}
+
+	return s.repo.Activate(ctx, version)
+}
+
 func (s *ModelRegistryService) EnsureBootstrapActive(ctx context.Context, manifestPath string) (domain.ModelManifest, error) {
 	manifest, err := LoadManifest(manifestPath)
 	if err != nil {
@@ -140,10 +160,10 @@ func LoadManifest(path string) (domain.ModelManifest, error) {
 	if manifest.ExportFormat == "onnx" || manifest.ExportFormat == "torchscript" {
 		// Currently backend does not have native inference for these
 		manifest.RuntimeStatus = RuntimeStatusMetadataOnly
-	} else if manifest.ExportFormat == "joblib" || manifest.ExportFormat == "pkl" {
+	} else if manifest.ExportFormat == "joblib" || manifest.ExportFormat == "pkl" || manifest.ExportFormat == "stub" {
 		// Tabular baseline might be available if using sidecar or native implementation
 		// For Sprint 8, we assume metadata_only for neural, and maybe available for tabular baseline
-		if manifest.ModelType == "hgb_multiclass" {
+		if manifest.ModelType == "hgb_multiclass" || manifest.ModelType == "stub_deterministic_v1" {
 			manifest.RuntimeStatus = RuntimeStatusAvailable
 		} else {
 			manifest.RuntimeStatus = RuntimeStatusMetadataOnly

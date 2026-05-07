@@ -140,6 +140,7 @@ export type PolicyValidationRunDTO = {
   id: number;
   policy_status: string;
   model_name: string;
+  model_version: string;
   scenario_name: string;
   calibration_method: string;
   threshold: number;
@@ -386,6 +387,7 @@ export type PolicyValidationRun = {
   id: number;
   policyStatus: string;
   modelName: string;
+  modelVersion: string;
   scenarioName: string;
   calibrationMethod: string;
   threshold: number;
@@ -500,6 +502,10 @@ export type WorkspaceShellData = {
   artifactDocuments: ArtifactDocument[];
   freshness?: FreshnessSummary;
   schedulers: SchedulerInfo[];
+  monitoringSummary?: MonitoringSummary;
+  signalEvents: SignalEvent[];
+  notificationRules: NotificationRule[];
+  notificationEvents: NotificationEvent[];
   generatedFrom: "api" | "mock";
 };
 
@@ -616,4 +622,104 @@ export type MLModelManifest = {
   inputWindowBars?: number;
   inputTensorShape?: number[];
   runtimeStatus: string;
+};
+
+export type MonitoringSummary = {
+  generatedAt: string;
+  models: {
+    activeVersion: string;
+    totalCount: number;
+  };
+  freshness: {
+    lastSignalAt: string;
+    staleAssets: number;
+  };
+  policy: {
+    activeRunId: number;
+    realizedPrecision: number;
+    maturedSignals: number;
+  };
+  notifications: {
+    recentWarnings: number;
+    recentCritical: number;
+  };
+  jobs: {
+    failedLast24h: number;
+  };
+};
+
+export type SignalEventDTO = {
+  id: number;
+  signal_run_id?: number;
+  event_type: string;
+  model_version: string;
+  ticker?: string;
+  idempotency_key?: string;
+  payload?: Record<string, unknown>;
+  created_at: string;
+};
+
+export type SignalEvent = {
+  id: number;
+  signalRunId?: number;
+  eventType: string;
+  modelVersion: string;
+  ticker?: string;
+  idempotencyKey?: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type NotificationRuleDTO = {
+  id: number;
+  ticker?: string;
+  event_type: string;
+  severity: string;
+  direction?: string;
+  model_version?: string;
+  threshold?: number;
+  is_enabled: boolean;
+  cooldown_minutes: number;
+};
+
+export type NotificationRule = {
+  id: number;
+  ticker?: string;
+  eventType: string;
+  severity: string;
+  direction?: string;
+  modelVersion?: string;
+  threshold?: number;
+  isEnabled: boolean;
+  cooldownMinutes: number;
+};
+
+export type NotificationEventDTO = {
+  id: number;
+  rule_id: number;
+  signal_event_id?: number;
+  event_type: string;
+  severity: string;
+  model_version: string;
+  ticker?: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  delivery_status: string;
+  delivery_attempts: number;
+  created_at: string;
+};
+
+export type NotificationEvent = {
+  id: number;
+  ruleId: number;
+  signalEventId?: number;
+  eventType: string;
+  severity: string;
+  modelVersion: string;
+  ticker?: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  deliveryStatus: string;
+  deliveryAttempts: number;
+  createdAt: string;
 };

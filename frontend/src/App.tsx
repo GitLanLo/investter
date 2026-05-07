@@ -41,9 +41,13 @@ import type {
   SignalCard,
   WorkspaceShellData,
   MLModelManifest,
+  MonitoringSummary,
+  SignalEvent,
+  NotificationRule,
+  NotificationEvent,
 } from "./lib/types";
 
-const shellNav = ["Overview", "Signal Lab", "Research Board", "Model Card", "Policy Gate", "Artifact Feed"];
+const shellNav = ["Overview", "Operator Board", "Signal Lab", "Research Board", "Model Card", "Policy Gate", "Artifact Feed"];
 const factorPalette = ["#d06931", "#1e7b89", "#5b7c2d", "#8d4fd1"];
 const emptyAssets: AssetCard[] = [];
 const emptySignals: SignalCard[] = [];
@@ -170,6 +174,10 @@ export function App() {
   const policyOutcomeSummary = shellData?.policyOutcomeSummary;
   const policyOutcomeHistory = shellData?.policyOutcomeHistory ?? [];
   const activeModel = shellData?.activeModel;
+  const monitoringSummary = shellData?.monitoringSummary;
+  const signalEvents = shellData?.signalEvents ?? [];
+  const notificationRules = shellData?.notificationRules ?? [];
+  const notificationEvents = shellData?.notificationEvents ?? [];
   const jobScheduler = shellData?.jobScheduler;
   const jobRuns = shellData?.jobRuns ?? [];
   const artifactDocuments = shellData?.artifactDocuments ?? emptyArtifactDocuments;
@@ -472,6 +480,31 @@ export function App() {
                 ))}
               </div>
             ) : null}
+          </div>
+        </section>
+
+        <section className="card" id="operator-board">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Status</p>
+              <h3>Deployment monitoring</h3>
+            </div>
+            {monitoringSummary && (
+              <span className={`badge badge-${monitoringSummary.notifications.recentCritical > 0 ? "bad" : monitoringSummary.notifications.recentWarnings > 0 ? "warn" : "good"}`}>
+                {monitoringSummary.notifications.recentCritical > 0 ? "critical alerts" : "active monitoring"}
+              </span>
+            )}
+          </div>
+          {monitoringSummary && <MonitoringPanel summary={monitoringSummary} />}
+
+          <div className="operator-grid" style={{ marginTop: "20px" }}>
+            <div className="operator-main">
+              <NotificationEventsList events={notificationEvents} />
+              <SignalEventsList events={signalEvents} />
+            </div>
+            <div className="operator-side">
+              <NotificationRulesPanel rules={notificationRules} />
+            </div>
           </div>
         </section>
 
@@ -2985,6 +3018,105 @@ function ModelCard({ model }: { model: MLModelManifest }) {
             <Metric key={key} label={key} value={formatMetric(value, 4)} />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MonitoringPanel({ summary }: { summary: MonitoringSummary }) {
+  return (
+    <div className="monitoring-panel">
+      <div className="monitoring-grid">
+        <div className="monitoring-item">
+          <p className="eyebrow">Active Model</p>
+          <p className="metric-value">{summary.models.activeVersion || "n/a"}</p>
+          <p className="signal-row-meta">{summary.models.totalCount} registered models</p>
+        </div>
+        <div className="monitoring-item">
+          <p className="eyebrow">Last Signal</p>
+          <p className="metric-value">{formatDate(summary.freshness.lastSignalAt)}</p>
+          <p className="signal-row-meta">{summary.freshness.staleAssets} stale assets</p>
+        </div>
+        <div className="monitoring-item">
+          <p className="eyebrow">Realized Precision</p>
+          <p className={`metric-value ${summary.policy.realizedPrecision >= 0.4 ? "tone-good" : "tone-warn"}`}>
+            {formatMetric(summary.policy.realizedPrecision, 3)}
+          </p>
+          <p className="signal-row-meta">{summary.policy.maturedSignals} matured outcomes</p>
+        </div>
+        <div className="monitoring-item">
+          <p className="eyebrow">Alerts (24h)</p>
+          <p className={`metric-value ${summary.notifications.recentCritical > 0 ? "tone-bad" : summary.notifications.recentWarnings > 0 ? "tone-warn" : "tone-good"}`}>
+            {summary.notifications.recentWarnings + summary.notifications.recentCritical}
+          </p>
+          <p className="signal-row-meta">{summary.notifications.recentCritical} critical / {summary.notifications.recentWarnings} warnings</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationEventsList({ events }: { events: NotificationEvent[] }) {
+  return (
+    <div className="operator-subpanel">
+      <h4>Recent notifications</h4>
+      {events.length === 0 ? (
+        <p className="empty-note">No recent notifications.</p>
+      ) : (
+        <div className="notification-list">
+          {events.map((e) => (
+            <div key={e.id} className={`notification-item ${e.severity}`}>
+              <div className="notification-header">
+                <span className="badge">{e.severity}</span>
+                <span className="signal-row-meta">{formatDate(e.createdAt)}</span>
+              </div>
+              <p className="notification-message">{e.message}</p>
+              {e.ticker && <span className="ticker-label">{e.ticker}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalEventsList({ events }: { events: SignalEvent[] }) {
+  return (
+    <div className="operator-subpanel">
+      <h4>System event stream</h4>
+      <div className="event-list">
+        {events.map((e) => (
+          <div key={e.id} className="event-item">
+            <span className="signal-row-meta">{formatDate(e.createdAt)}</span>
+            <span className="event-type">{e.eventType}</span>
+            <span className="event-model">{e.modelVersion}</span>
+            {e.ticker && <span className="event-ticker">{e.ticker}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NotificationRulesPanel({ rules }: { rules: NotificationRule[] }) {
+  return (
+    <div className="operator-subpanel">
+      <h4>Notification rules</h4>
+      <div className="rule-list">
+        {rules.map((r) => (
+          <div key={r.id} className={`rule-item ${r.isEnabled ? "enabled" : "disabled"}`}>
+            <div className="rule-info">
+              <strong>{r.eventType}</strong>
+              <p className="signal-row-meta">{r.ticker || "all assets"} · {r.severity} · {r.cooldownMinutes}m cooldown</p>
+            </div>
+            <div className="rule-toggle">
+              <span className="badge">{r.isEnabled ? "on" : "off"}</span>
+            </div>
+          </div>
+        ))}
+        <button className="btn btn-secondary btn-sm" style={{ width: "100%", marginTop: "10px" }}>
+          + Add rule
+        </button>
       </div>
     </div>
   );

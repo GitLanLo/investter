@@ -270,6 +270,7 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
       id: 1,
       policyStatus: "production_candidate",
       modelName: "hgb_multiclass",
+      modelVersion: "baseline_stub_v1",
       scenarioName: "core_price_volume_only",
       calibrationMethod: "platt",
       threshold: 0.3,
@@ -517,6 +518,10 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
     { name: "watchlist_signal_refresh", enabled: false, interval: "30m0s" },
   ],
   activeModel: undefined,
+  monitoringSummary: undefined,
+  signalEvents: [],
+  notificationRules: [],
+  notificationEvents: [],
 };
 
 const mockWorkbenchByAsset = new Map<string, AssetWorkbenchData>(

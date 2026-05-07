@@ -126,3 +126,40 @@ func (r *ModelRegistryRepository) Register(ctx context.Context, entry domain.Mod
 
 	return err
 }
+
+func (r *ModelRegistryRepository) Activate(ctx context.Context, version string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Demote current active
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE model_registry
+		SET status = 'inactive'
+		WHERE status = $1
+	`, domain.ModelStatusActive); err != nil {
+		return err
+	}
+
+	// Promote new one
+	res, err := tx.ExecContext(ctx, `
+		UPDATE model_registry
+		SET status = $1
+		WHERE model_version = $2
+	`, domain.ModelStatusActive, version)
+	if err != nil {
+		return err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+
+	return tx.Commit()
+}

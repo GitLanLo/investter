@@ -20,12 +20,14 @@ func NewContainer(db *sql.DB, cfg config.Config) Container {
 	watchlistRepo := postgres.NewWatchlistRepository(db)
 	modelRepo := postgres.NewModelRegistryRepository(db)
 	signalRepo := postgres.NewSignalRunRepository(db)
+	eventRepo := postgres.NewSignalEventRepository(db)
+	notificationRepo := postgres.NewNotificationRepository(db)
 	outcomeRepo := postgres.NewSignalOutcomeRepository(db)
 	jobRepo := postgres.NewJobRunRepository(db)
 	policyRepo := postgres.NewPolicyValidationRunRepository(db)
 	tinkoffAdapter := service.NewTinkoffAdapter(cfg.TinkoffInvestToken, cfg.TinkoffInvestTarget, cfg.TinkoffCACertFile)
 
-	svcs := service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo, outcomeRepo, jobRepo, policyRepo, cfg.MLDataRoot, cfg.MLResearchRoot, tinkoffAdapter)
+	svcs := service.NewServices(assetRepo, marketDataRepo, watchlistRepo, modelRepo, signalRepo, eventRepo, notificationRepo, outcomeRepo, jobRepo, policyRepo, cfg.MLDataRoot, cfg.MLResearchRoot, tinkoffAdapter)
 
 	watchlistRefresh := service.NewWatchlistRefreshService(
 		watchlistRepo, assetRepo, marketDataRepo, jobRepo, signalRepo,

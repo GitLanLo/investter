@@ -75,6 +75,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		},
 	}
 	signalRepo := &testSignalRepo{}
+	eventRepo := &testSignalEventRepo{}
 
 	router := NewRouter(config.Config{
 		AppEnv:                   "test",
@@ -87,7 +88,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 				Assets:    service.NewAssetService(assetRepo),
 				Watchlist: service.NewWatchlistService(&testWatchlistRepo{}),
 				Models:    service.NewModelRegistryService(modelRepo),
-				Analysis:  service.NewAnalysisService(assetRepo, modelRepo, signalRepo),
+				Analysis:  service.NewAnalysisService(assetRepo, modelRepo, signalRepo, eventRepo, nil),
 			},
 		},
 	})
@@ -157,6 +158,114 @@ func TestAnalysisEndpoints(t *testing.T) {
 	if history.Items[0].AssetID != "SBER" {
 		t.Fatalf("unexpected history asset_id: %s", history.Items[0].AssetID)
 	}
+}
+
+func TestModelManifestEndpointsExposeSprint9RuntimeState(t *testing.T) {
+	manifestPath := writeTestNeuralManifest(t)
+	modelRepo := &testModelRepo{
+		active: domain.ModelRegistryEntry{
+			ModelVersion:         "sprint8_gru_1h_h24_w96",
+			ModelType:            "gru",
+			Status:               domain.ModelStatusActive,
+			Timeframe:            "1h",
+			HorizonBars:          24,
+			FeatureSchemaVersion: "sprint8",
+			ManifestPath:         manifestPath,
+		},
+	}
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Models: service.NewModelRegistryService(modelRepo),
+			},
+		},
+	})
+
+	for _, path := range []string{"/ml/models/active", "/ml/models/sprint8_gru_1h_h24_w96"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Fatalf("unexpected status for GET %s: %d body=%s", path, resp.Code, resp.Body.String())
+		}
+
+		var body mlModelManifestDTO
+		if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode model manifest response: %v", err)
+		}
+		if body.ModelVersion != "sprint8_gru_1h_h24_w96" {
+			t.Fatalf("unexpected model version: %+v", body)
+		}
+		if body.ModelFamily != "gru" || body.ModelType != "gru" {
+			t.Fatalf("expected GRU model aliases, got %+v", body)
+		}
+		if body.InputWindowBars != 96 || len(body.InputTensorShape) != 2 || body.InputTensorShape[0] != 96 {
+			t.Fatalf("unexpected neural input shape: %+v", body)
+		}
+		if body.RuntimeStatus != service.RuntimeStatusMetadataOnly {
+			t.Fatalf("expected metadata_only runtime status, got %+v", body)
+		}
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, "/ml/models/missing", nil)
+	missingResp := httptest.NewRecorder()
+	router.ServeHTTP(missingResp, missingReq)
+	if missingResp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing model, got %d body=%s", missingResp.Code, missingResp.Body.String())
+	}
+}
+
+func TestModelActivation(t *testing.T) {
+	manifestPath := writeTestManifest(t)
+	neuralPath := writeTestNeuralManifest(t)
+
+	modelRepo := &testModelRepo{
+		active: domain.ModelRegistryEntry{ModelVersion: "baseline", ManifestPath: manifestPath},
+		items: map[string]domain.ModelRegistryEntry{
+			"neural": {ModelVersion: "neural", ManifestPath: neuralPath},
+			"next":   {ModelVersion: "next", ManifestPath: manifestPath},
+		},
+	}
+	eventRepo := &testSignalEventRepo{}
+
+	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
+		DB: &sql.DB{},
+		Container: app.Container{
+			Services: service.Services{
+				Models:    service.NewModelRegistryService(modelRepo),
+				Promotion: service.NewPolicyPromotionService(nil, service.NewModelRegistryService(modelRepo), nil, eventRepo, nil),
+			},
+		},
+	})
+
+	t.Run("blocks metadata_only activation", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/ml/models/neural/activate", nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden, got %d body=%s", resp.Code, resp.Body.String())
+		}
+		if modelRepo.active.ModelVersion != "baseline" {
+			t.Fatalf("expected baseline to remain active")
+		}
+	})
+
+	t.Run("allows available model activation", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/ml/models/next/activate", nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d body=%s", resp.Code, resp.Body.String())
+		}
+		if modelRepo.active.ModelVersion != "next" {
+			t.Fatalf("expected next to be active")
+		}
+	})
 }
 
 func TestMarketDataEndpoints(t *testing.T) {
@@ -700,7 +809,9 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 	policyRepo := &testPolicyValidationRepo{}
 	signalRepo := &testSignalRepo{}
 	outcomeRepo := &testSignalOutcomeRepo{}
+	eventRepo := &testSignalEventRepo{}
 	jobRepo := &testJobRunRepo{}
+	modelRepo := &testModelRepo{}
 	assetRepo := &testAssetRepo{
 		assets: map[string]domain.Asset{
 			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m", IsActive: true},
@@ -721,6 +832,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		service.NewResearchArtifactsService(dataRoot, researchRoot),
 		signalRepo,
 	).WithOutcomeData(assetRepo, marketRepo, outcomeRepo)
+	models := service.NewModelRegistryService(modelRepo)
 	router := NewRouter(config.Config{
 		AppEnv:                   "test",
 		OutcomeSchedulerInterval: 15 * time.Minute,
@@ -729,8 +841,9 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		DB: &sql.DB{},
 		Container: app.Container{
 			Services: service.Services{
-				Policy: policyService,
-				Jobs:   service.NewJobService(jobRepo, policyService),
+				Policy:    policyService,
+				Promotion: service.NewPolicyPromotionService(policyRepo, models, policyService, eventRepo, nil),
+				Jobs:      service.NewJobService(jobRepo, policyService),
 			},
 		},
 	})
@@ -1166,6 +1279,18 @@ func (r *testModelRepo) Register(context.Context, domain.ModelRegistryEntry) err
 	return nil
 }
 
+func (r *testModelRepo) Activate(_ context.Context, version string) error {
+	if version == r.active.ModelVersion {
+		return nil
+	}
+	if item, ok := r.items[version]; ok {
+		r.active = item
+		r.active.Status = domain.ModelStatusActive
+		return nil
+	}
+	return sql.ErrNoRows
+}
+
 type testSignalRepo struct {
 	items []domain.SignalRun
 }
@@ -1408,6 +1533,35 @@ func (r *testPolicyValidationRepo) UpdateDecisionState(
 	return domain.PolicyValidationRun{}, sql.ErrNoRows
 }
 
+func (r *testPolicyValidationRepo) GetByID(ctx context.Context, id int64) (domain.PolicyValidationRun, error) {
+	for _, item := range r.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return domain.PolicyValidationRun{}, sql.ErrNoRows
+}
+
+func (r *testPolicyValidationRepo) DemoteCurrentAndPromote(ctx context.Context, targetRunID int64, demoteReason string, promotionLog domain.PolicyPromotionLog) error {
+	for i, item := range r.items {
+		if item.DecisionState == domain.PolicyDecisionActive || item.DecisionState == domain.PolicyDecisionPromoted {
+			item.DecisionState = domain.PolicyDecisionArchived
+			r.items[i] = item
+		}
+	}
+	for i, item := range r.items {
+		if item.ID == targetRunID {
+			item.DecisionState = domain.PolicyDecisionActive
+			r.items[i] = item
+		}
+	}
+	return nil
+}
+
+func (r *testPolicyValidationRepo) LogPromotion(ctx context.Context, log domain.PolicyPromotionLog) error {
+	return nil
+}
+
 var _ repository.AssetRepository = (*testAssetRepo)(nil)
 var _ repository.WatchlistRepository = (*testWatchlistRepo)(nil)
 var _ repository.ModelRegistryRepository = (*testModelRepo)(nil)
@@ -1441,6 +1595,39 @@ func writeTestManifest(t *testing.T) string {
 
 	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
+	}
+	return path
+}
+
+func writeTestNeuralManifest(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model_manifest.json")
+	payload := `{
+		"model_version": "sprint8_gru_1h_h24_w96",
+		"model_family": "gru",
+		"task": "multiclass",
+		"classes": ["down", "no_trade", "up"],
+		"input_timeframe": "1h",
+		"prediction_horizon_bars": 24,
+		"feature_schema_version": "sprint8",
+		"feature_order": ["f1", "f2"],
+		"export_format": "torchscript",
+		"model_artifact_path": "model.pt",
+		"artifact_sha256": "fake",
+		"metrics": {"f1_macro": 0.36},
+		"threshold": 0.33,
+		"calibration": "none",
+		"created_at": "2026-05-07T01:31:13Z",
+		"source_dataset_version": "sprint8_1h_h24_20260506",
+		"input_window_bars": 96,
+		"input_tensor_shape": [96, 48],
+		"normalization": "standard"
+	}`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write neural manifest: %v", err)
 	}
 	return path
 }
@@ -1496,4 +1683,63 @@ func mustTime(t *testing.T, value string) time.Time {
 		t.Fatalf("parse time %q: %v", value, err)
 	}
 	return ts
+}
+
+type testSignalEventRepo struct {
+	items []domain.SignalEvent
+}
+
+func (r *testSignalEventRepo) Create(ctx context.Context, e domain.SignalEvent) (domain.SignalEvent, error) {
+	r.items = append(r.items, e)
+	return e, nil
+}
+
+func (r *testSignalEventRepo) Upsert(ctx context.Context, e domain.SignalEvent) (domain.SignalEvent, error) {
+	r.items = append(r.items, e)
+	return e, nil
+}
+
+func (r *testSignalEventRepo) ListLatest(ctx context.Context, limit int) ([]domain.SignalEvent, error) {
+	return r.items, nil
+}
+
+func (r *testSignalEventRepo) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error) {
+	return r.items, nil
+}
+
+type testNotificationRepo struct {
+	rules []domain.NotificationRule
+	events []domain.NotificationEvent
+}
+
+func (r *testNotificationRepo) ListRules(ctx context.Context) ([]domain.NotificationRule, error) {
+	return r.rules, nil
+}
+func (r *testNotificationRepo) ListActiveRules(ctx context.Context) ([]domain.NotificationRule, error) {
+	return r.rules, nil
+}
+func (r *testNotificationRepo) GetRuleByID(ctx context.Context, id int64) (domain.NotificationRule, error) {
+	return domain.NotificationRule{}, nil
+}
+func (r *testNotificationRepo) CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
+	rule.ID = int64(len(r.rules) + 1)
+	r.rules = append(r.rules, rule)
+	return rule, nil
+}
+func (r *testNotificationRepo) UpdateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
+	return rule, nil
+}
+func (r *testNotificationRepo) DeleteRule(ctx context.Context, id int64) error {
+	return nil
+}
+func (r *testNotificationRepo) CreateEvent(ctx context.Context, event domain.NotificationEvent) (domain.NotificationEvent, error) {
+	event.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, event)
+	return event, nil
+}
+func (r *testNotificationRepo) ListLatestEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error) {
+	return r.events, nil
+}
+func (r *testNotificationRepo) GetLatestEventForRule(ctx context.Context, ruleID int64) (domain.NotificationEvent, error) {
+	return domain.NotificationEvent{}, nil
 }

@@ -44,6 +44,13 @@ import type {
   SchedulersResponse,
   MLModelManifest,
   MLModelManifestDTO,
+  MonitoringSummary,
+  SignalEvent,
+  SignalEventDTO,
+  NotificationRule,
+  NotificationRuleDTO,
+  NotificationEvent,
+  NotificationEventDTO,
 } from "./types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
@@ -73,7 +80,20 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
       fetchJson<MLModelManifestDTO>("/ml/models/active").catch(() => undefined),
     ]);
-    const [validationRuns, shadowSummary, outcomeSummary, outcomeHistory, jobs, scheduler, freshness, schedulers] = await Promise.all([
+    const [
+      validationRuns,
+      shadowSummary,
+      outcomeSummary,
+      outcomeHistory,
+      jobs,
+      scheduler,
+      freshness,
+      schedulers,
+      monitoring,
+      signalEvents,
+      notifRules,
+      notifEvents,
+    ] = await Promise.all([
       fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
       fetchJson<PolicyShadowSummaryDTO>("/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
       fetchJson<PolicyOutcomeSummaryDTO>("/ml/policy/outcomes?limit=1000").catch(() => undefined),
@@ -82,6 +102,10 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       fetchJson<JobSchedulerStatusDTO>("/jobs/scheduler").catch(() => undefined),
       fetchJson<FreshnessSummaryDTO>("/watchlist/freshness").catch(() => undefined),
       fetchJson<SchedulersResponse>("/jobs/schedulers").catch(() => undefined),
+      fetchJson<MonitoringSummary>("/ml/monitoring/summary").catch(() => undefined),
+      fetchJson<{ items: SignalEventDTO[] }>("/ml/events?limit=20").catch(() => ({ items: [] })),
+      fetchJson<{ items: NotificationRuleDTO[] }>("/ml/notifications/rules").catch(() => ({ items: [] })),
+      fetchJson<{ items: NotificationEventDTO[] }>("/ml/notifications/events?limit=20").catch(() => ({ items: [] })),
     ]);
 
     return {
@@ -100,6 +124,10 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       artifactDocuments: documents.items.map(mapResearchDocument),
       freshness: freshness ? mapFreshnessSummary(freshness) : undefined,
       schedulers: schedulers?.schedulers ?? [],
+      monitoringSummary: monitoring,
+      signalEvents: signalEvents.items.map(mapSignalEvent),
+      notificationRules: notifRules.items.map(mapNotificationRule),
+      notificationEvents: notifEvents.items.map(mapNotificationEvent),
     };
   } catch {
     return mockWorkspaceShellData;
@@ -332,6 +360,7 @@ function mapPolicyValidationRun(dto: PolicyValidationRunDTO): PolicyValidationRu
     id: dto.id,
     policyStatus: dto.policy_status,
     modelName: dto.model_name,
+    modelVersion: dto.model_version,
     scenarioName: dto.scenario_name,
     calibrationMethod: dto.calibration_method,
     threshold: dto.threshold,
@@ -782,5 +811,49 @@ function mapMLModelManifest(dto: MLModelManifestDTO): MLModelManifest {
     inputWindowBars: dto.input_window_bars,
     inputTensorShape: dto.input_tensor_shape,
     runtimeStatus: dto.runtime_status,
+  };
+}
+
+function mapSignalEvent(dto: SignalEventDTO): SignalEvent {
+  return {
+    id: dto.id,
+    signalRunId: dto.signal_run_id,
+    eventType: dto.event_type,
+    modelVersion: dto.model_version,
+    ticker: dto.ticker,
+    idempotencyKey: dto.idempotency_key,
+    payload: dto.payload,
+    createdAt: dto.created_at,
+  };
+}
+
+function mapNotificationRule(dto: NotificationRuleDTO): NotificationRule {
+  return {
+    id: dto.id,
+    ticker: dto.ticker,
+    eventType: dto.event_type,
+    severity: dto.severity,
+    direction: dto.direction,
+    modelVersion: dto.model_version,
+    threshold: dto.threshold,
+    isEnabled: dto.is_enabled,
+    cooldownMinutes: dto.cooldown_minutes,
+  };
+}
+
+function mapNotificationEvent(dto: NotificationEventDTO): NotificationEvent {
+  return {
+    id: dto.id,
+    ruleId: dto.rule_id,
+    signalEventId: dto.signal_event_id,
+    eventType: dto.event_type,
+    severity: dto.severity,
+    modelVersion: dto.model_version,
+    ticker: dto.ticker,
+    message: dto.message,
+    payload: dto.payload,
+    deliveryStatus: dto.delivery_status,
+    deliveryAttempts: dto.delivery_attempts,
+    createdAt: dto.created_at,
   };
 }

@@ -31,6 +31,7 @@ type ProductionPolicySnapshot struct {
 	GeneratedAt       time.Time
 	PolicyStatus      string
 	ModelName         string
+	ModelVersion      string
 	ScenarioName      string
 	CalibrationMethod string
 	Threshold         float64

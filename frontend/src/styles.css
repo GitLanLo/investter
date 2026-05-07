@@ -2738,3 +2738,108 @@ body::before {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Monitoring Panel */
+.monitoring-panel {
+  padding: 20px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.monitoring-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.monitoring-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 5px 0;
+}
+
+/* Operator Board */
+.operator-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+
+.operator-subpanel {
+  background: var(--bg-card);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.operator-subpanel h4 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.notification-list, .event-list, .rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notification-item {
+  padding: 10px;
+  border-left: 4px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.notification-item.critical { border-left-color: var(--tone-bad); }
+.notification-item.warning { border-left-color: var(--tone-warn); }
+.notification-item.info { border-left-color: var(--tone-good); }
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.notification-message {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.event-item {
+  display: grid;
+  grid-template-columns: 150px 1fr 1fr 100px;
+  gap: 10px;
+  font-size: 0.85rem;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rule-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rule-item.disabled {
+  opacity: 0.5;
+}
+
+.ticker-label {
+  display: inline-block;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-top: 5px;
+}

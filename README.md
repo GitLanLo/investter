@@ -180,6 +180,7 @@ invest-ml run-research-pipeline \
 ## Sprint 9 plan
 
 - Sprint 9 plan: `docs/sprint9_plan.md`;
+- Sprint 9 test plan: `docs/sprint9_test_plan.md`;
 - focus: model activation guards, promotion/rollback, signal events, notification rules, and monitoring;
 - first blocker to handle: neural artifacts are metadata-readable but not executable by backend runtime.
 
@@ -202,6 +203,7 @@ invest-ml run-research-pipeline \
 - `docs/sprint7_plan.md`
 - `docs/sprint8_plan.md`
 - `docs/sprint9_plan.md`
+- `docs/sprint9_test_plan.md`
 - `docs/contracts/api_v1.md`
 - `docs/contracts/data_model_contracts_v1.md`
 - `docs/integrations/tinkoff_invest_api.md`

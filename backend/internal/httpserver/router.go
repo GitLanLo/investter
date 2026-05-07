@@ -240,6 +240,7 @@ type mlPolicyValidationRunDTO struct {
 	ID                int64                        `json:"id"`
 	PolicyStatus      string                       `json:"policy_status"`
 	ModelName         string                       `json:"model_name"`
+	ModelVersion      string                       `json:"model_version"`
 	ScenarioName      string                       `json:"scenario_name"`
 	CalibrationMethod string                       `json:"calibration_method"`
 	Threshold         float64                      `json:"threshold"`
@@ -379,18 +380,218 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 			Env:      cfg.AppEnv,
 			Frontend: "http://localhost:5173/",
 			Links: map[string]string{
-				"health":              "/health",
-				"ready":               "/ready",
-				"assets":              "/assets",
-				"watchlist":           "/watchlist",
-				"freshness":           "/watchlist/freshness",
-				"jobs":                "/jobs/runs?limit=10",
-				"data_refresh_job":    "POST /jobs/data-refresh",
-				"signal_refresh_job":  "POST /jobs/signals/run",
-				"outcome_materialize": "POST /jobs/outcomes/materialize",
-				"ml_models":           "/ml/models/active",
+				"health":                "/health",
+				"ready":                 "/ready",
+				"assets":                "/assets",
+				"watchlist":             "/watchlist",
+				"freshness":             "/watchlist/freshness",
+				"jobs":                  "/jobs/runs?limit=10",
+				"data_refresh_job":      "POST /jobs/data-refresh",
+				"signal_refresh_job":    "POST /jobs/signals/run",
+				"outcome_materialize":   "POST /jobs/outcomes/materialize",
+				"ml_models":             "/ml/models/active",
+				"ml_model_activate":     "POST /ml/models/{version}/activate",
+				"policy_promote":        "POST /ml/policy/validation-runs/{id}/promote",
+				"policy_rollback":       "POST /ml/policy/validation-runs/{id}/rollback",
+				"ml_events":             "/ml/events?limit=20",
+				"signal_events":         "/signals/events?asset_id=SBER&limit=10",
+				"ml_notifications":      "/ml/notifications/events?limit=20",
+				"ml_notification_rules": "/ml/notifications/rules",
+				"ml_monitoring":         "/ml/monitoring/summary",
 			},
 		})
+	})
+
+	mux.HandleFunc("/signals/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		assetID := r.URL.Query().Get("asset_id")
+		if assetID == "" {
+			writeError(w, http.StatusBadRequest, "missing_asset_id", "asset_id query parameter is required", nil)
+			return
+		}
+		limit := 10
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			if parsed, err := strconv.Atoi(rawLimit); err == nil {
+				limit = parsed
+			}
+		}
+
+		events, err := deps.Container.Services.Analysis.ListEventsByAsset(r.Context(), assetID, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "event_list_failed", err.Error(), nil)
+			return
+		}
+
+		out := make([]signalEventDTO, 0, len(events))
+		for _, e := range events {
+			out = append(out, toSignalEventDTO(e))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	})
+
+	mux.HandleFunc("/ml/monitoring/summary", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		if deps.Container.Services.Monitoring == nil {
+			writeError(w, http.StatusServiceUnavailable, "monitoring_unavailable", "monitoring service is not configured", nil)
+			return
+		}
+
+		summary, err := deps.Container.Services.Monitoring.GetSummary(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "monitoring_failed", err.Error(), nil)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, summary)
+	})
+
+	mux.HandleFunc("/ml/notifications/rules", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Notifications == nil {
+			writeError(w, http.StatusServiceUnavailable, "notifications_unavailable", "notification service is not configured", nil)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			rules, err := deps.Container.Services.Notifications.ListRules(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "rule_list_failed", err.Error(), nil)
+				return
+			}
+			out := make([]notificationRuleDTO, 0, len(rules))
+			for _, rule := range rules {
+				out = append(out, toNotificationRuleDTO(rule))
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": out})
+
+		case http.MethodPost:
+			var req notificationRuleDTO
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+				return
+			}
+			created, err := deps.Container.Services.Notifications.CreateRule(r.Context(), domain.NotificationRule{
+				Ticker:          req.Ticker,
+				EventType:       req.EventType,
+				Severity:        req.Severity,
+				Direction:       req.Direction,
+				ModelVersion:    req.ModelVersion,
+				Threshold:       req.Threshold,
+				IsEnabled:       req.IsEnabled,
+				CooldownMinutes: req.CooldownMinutes,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "rule_create_failed", err.Error(), nil)
+				return
+			}
+			writeJSON(w, http.StatusCreated, toNotificationRuleDTO(created))
+
+		default:
+			writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+		}
+	})
+
+	mux.HandleFunc("/ml/notifications/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Container.Services.Notifications == nil {
+			writeError(w, http.StatusServiceUnavailable, "notifications_unavailable", "notification service is not configured", nil)
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_id", "id must be an integer", nil)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodPatch:
+			var req notificationRuleDTO
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+				return
+			}
+			updated, err := deps.Container.Services.Notifications.UpdateRule(r.Context(), domain.NotificationRule{
+				ID:              id,
+				Ticker:          req.Ticker,
+				EventType:       req.EventType,
+				Severity:        req.Severity,
+				Direction:       req.Direction,
+				ModelVersion:    req.ModelVersion,
+				Threshold:       req.Threshold,
+				IsEnabled:       req.IsEnabled,
+				CooldownMinutes: req.CooldownMinutes,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "rule_update_failed", err.Error(), nil)
+				return
+			}
+			writeJSON(w, http.StatusOK, toNotificationRuleDTO(updated))
+
+		case http.MethodDelete:
+			if err := deps.Container.Services.Notifications.DeleteRule(r.Context(), id); err != nil {
+				writeError(w, http.StatusInternalServerError, "rule_delete_failed", err.Error(), nil)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			writeMethodNotAllowed(w, http.MethodPatch, http.MethodDelete)
+		}
+	})
+
+	mux.HandleFunc("/ml/notifications/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		limit := 20
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			if parsed, err := strconv.Atoi(rawLimit); err == nil {
+				limit = parsed
+			}
+		}
+
+		events, err := deps.Container.Services.Notifications.ListEvents(r.Context(), limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "event_list_failed", err.Error(), nil)
+			return
+		}
+
+		out := make([]notificationEventDTO, 0, len(events))
+		for _, e := range events {
+			out = append(out, toNotificationEventDTO(e))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	})
+
+	mux.HandleFunc("/ml/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		limit := 20
+		if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+			if parsed, err := strconv.Atoi(rawLimit); err == nil {
+				limit = parsed
+			}
+		}
+
+		events, err := deps.Container.Services.Analysis.ListEvents(r.Context(), limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "event_list_failed", err.Error(), nil)
+			return
+		}
+
+		out := make([]signalEventDTO, 0, len(events))
+		for _, e := range events {
+			out = append(out, toSignalEventDTO(e))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": out})
 	})
 
 	mux.HandleFunc("/ml/models/active", func(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +621,38 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		entry, err := deps.Container.Services.Models.GetByVersion(r.Context(), version)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "model_not_found", err.Error(), nil)
+			return
+		}
+		manifest, err := service.LoadManifest(entry.ManifestPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "manifest_load_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, toModelManifestDTO(manifest))
+	})
+
+	mux.HandleFunc("/ml/models/{version}/activate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		version := r.PathValue("version")
+		err := deps.Container.Services.Models.Activate(r.Context(), version)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrModelRuntimeBlocked):
+				writeError(w, http.StatusForbidden, "model_runtime_blocked", err.Error(), nil)
+			case errors.Is(err, sql.ErrNoRows):
+				writeError(w, http.StatusNotFound, "model_not_found", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "model_activation_failed", err.Error(), nil)
+			}
+			return
+		}
+
+		entry, err := deps.Container.Services.Models.GetActive(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "active_model_lookup_failed", err.Error(), nil)
 			return
 		}
 		manifest, err := service.LoadManifest(entry.ManifestPath)
@@ -963,6 +1196,55 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 		default:
 			writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
 		}
+	})
+
+	mux.HandleFunc("/ml/policy/validation-runs/{id}/promote", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_id", "id must be an integer", nil)
+			return
+		}
+
+		err = deps.Container.Services.Promotion.Promote(r.Context(), id)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrPromotionBlocked):
+				writeError(w, http.StatusUnprocessableEntity, "promotion_blocked", err.Error(), nil)
+			case errors.Is(err, service.ErrPolicyValidationRunNotFound):
+				writeError(w, http.StatusNotFound, "run_not_found", err.Error(), nil)
+			default:
+				writeError(w, http.StatusInternalServerError, "promotion_failed", err.Error(), nil)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/ml/policy/validation-runs/{id}/rollback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_id", "id must be an integer", nil)
+			return
+		}
+
+		err = deps.Container.Services.Promotion.Rollback(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, service.ErrPolicyValidationRunNotFound) {
+				writeError(w, http.StatusNotFound, "run_not_found", err.Error(), nil)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "rollback_failed", err.Error(), nil)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("/ml/policy/validation-runs/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -1526,6 +1808,7 @@ func toPolicyValidationRunDTO(run domain.PolicyValidationRun) mlPolicyValidation
 		ID:                run.ID,
 		PolicyStatus:      run.PolicyStatus,
 		ModelName:         run.ModelName,
+		ModelVersion:      run.ModelVersion,
 		ScenarioName:      run.ScenarioName,
 		CalibrationMethod: run.CalibrationMethod,
 		Threshold:         run.Threshold,
@@ -1737,5 +2020,87 @@ func toModelManifestDTO(m domain.ModelManifest) mlModelManifestDTO {
 		InputWindowBars:           m.InputWindowBars,
 		InputTensorShape:          m.InputTensorShape,
 		RuntimeStatus:             m.RuntimeStatus,
+	}
+}
+
+type signalEventDTO struct {
+	ID             int64          `json:"id"`
+	SignalRunID    *int64         `json:"signal_run_id,omitempty"`
+	EventType      string         `json:"event_type"`
+	ModelVersion   string         `json:"model_version"`
+	Ticker         string         `json:"ticker,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+}
+
+func toSignalEventDTO(e domain.SignalEvent) signalEventDTO {
+	return signalEventDTO{
+		ID:             e.ID,
+		SignalRunID:    e.SignalRunID,
+		EventType:      e.EventType,
+		ModelVersion:   e.ModelVersion,
+		Ticker:         e.Ticker,
+		IdempotencyKey: e.IdempotencyKey,
+		Payload:        e.Payload,
+		CreatedAt:      e.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+type notificationRuleDTO struct {
+	ID              int64   `json:"id"`
+	Ticker          string  `json:"ticker,omitempty"`
+	EventType       string  `json:"event_type"`
+	Severity        string  `json:"severity"`
+	Direction       string  `json:"direction,omitempty"`
+	ModelVersion    string  `json:"model_version,omitempty"`
+	Threshold       float64 `json:"threshold,omitempty"`
+	IsEnabled       bool    `json:"is_enabled"`
+	CooldownMinutes int     `json:"cooldown_minutes"`
+}
+
+func toNotificationRuleDTO(r domain.NotificationRule) notificationRuleDTO {
+	return notificationRuleDTO{
+		ID:              r.ID,
+		Ticker:          r.Ticker,
+		EventType:       r.EventType,
+		Severity:        r.Severity,
+		Direction:       r.Direction,
+		ModelVersion:    r.ModelVersion,
+		Threshold:       r.Threshold,
+		IsEnabled:       r.IsEnabled,
+		CooldownMinutes: r.CooldownMinutes,
+	}
+}
+
+type notificationEventDTO struct {
+	ID               int64          `json:"id"`
+	RuleID           int64          `json:"rule_id"`
+	SignalEventID    *int64         `json:"signal_event_id,omitempty"`
+	EventType        string         `json:"event_type"`
+	Severity         string         `json:"severity"`
+	ModelVersion     string         `json:"model_version"`
+	Ticker           string         `json:"ticker,omitempty"`
+	Message          string         `json:"message"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	DeliveryStatus   string         `json:"delivery_status"`
+	DeliveryAttempts int            `json:"delivery_attempts"`
+	CreatedAt        string         `json:"created_at"`
+}
+
+func toNotificationEventDTO(e domain.NotificationEvent) notificationEventDTO {
+	return notificationEventDTO{
+		ID:               e.ID,
+		RuleID:           e.RuleID,
+		SignalEventID:    e.SignalEventID,
+		EventType:        e.EventType,
+		Severity:         e.Severity,
+		ModelVersion:     e.ModelVersion,
+		Ticker:           e.Ticker,
+		Message:          e.Message,
+		Payload:          e.Payload,
+		DeliveryStatus:   e.DeliveryStatus,
+		DeliveryAttempts: e.DeliveryAttempts,
+		CreatedAt:        e.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

@@ -355,3 +355,154 @@ func signalPolicyFromNullableFields(
 		DatasetVersion:    datasetVersion.String,
 	}
 }
+
+type SignalEventRepository struct {
+	db *sql.DB
+}
+
+func NewSignalEventRepository(db *sql.DB) *SignalEventRepository {
+	return &SignalEventRepository{db: db}
+}
+
+func (r *SignalEventRepository) Create(ctx context.Context, event domain.SignalEvent) (domain.SignalEvent, error) {
+	rawPayload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return domain.SignalEvent{}, err
+	}
+
+	err = r.db.QueryRowContext(ctx, `
+		INSERT INTO signal_events (signal_run_id, event_type, model_version, ticker, idempotency_key, payload)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6)
+		RETURNING id, created_at
+	`,
+		event.SignalRunID,
+		event.EventType,
+		event.ModelVersion,
+		event.Ticker,
+		event.IdempotencyKey,
+		string(rawPayload),
+	).Scan(&event.ID, &event.CreatedAt)
+	if err != nil {
+		return domain.SignalEvent{}, err
+	}
+
+	return event, nil
+}
+
+func (r *SignalEventRepository) Upsert(ctx context.Context, event domain.SignalEvent) (domain.SignalEvent, error) {
+	if event.IdempotencyKey == "" {
+		return r.Create(ctx, event)
+	}
+
+	rawPayload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return domain.SignalEvent{}, err
+	}
+
+	err = r.db.QueryRowContext(ctx, `
+		INSERT INTO signal_events (signal_run_id, event_type, model_version, ticker, idempotency_key, payload)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
+		SET signal_run_id = EXCLUDED.signal_run_id,
+		    event_type = EXCLUDED.event_type,
+		    model_version = EXCLUDED.model_version,
+		    ticker = EXCLUDED.ticker,
+		    payload = EXCLUDED.payload
+		RETURNING id, created_at
+	`,
+		event.SignalRunID,
+		event.EventType,
+		event.ModelVersion,
+		event.Ticker,
+		event.IdempotencyKey,
+		string(rawPayload),
+	).Scan(&event.ID, &event.CreatedAt)
+	if err != nil {
+		return domain.SignalEvent{}, err
+	}
+
+	return event, nil
+}
+
+func (r *SignalEventRepository) ListLatest(ctx context.Context, limit int) ([]domain.SignalEvent, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, signal_run_id, event_type, model_version, ticker, idempotency_key, payload, created_at
+		FROM signal_events
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.SignalEvent
+	for rows.Next() {
+		var (
+			item       domain.SignalEvent
+			rawPayload []byte
+			ik         sql.NullString
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.SignalRunID,
+			&item.EventType,
+			&item.ModelVersion,
+			&item.Ticker,
+			&ik,
+			&rawPayload,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.IdempotencyKey = ik.String
+		if len(rawPayload) > 0 {
+			_ = json.Unmarshal(rawPayload, &item.Payload)
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}
+
+func (r *SignalEventRepository) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, signal_run_id, event_type, model_version, ticker, idempotency_key, payload, created_at
+		FROM signal_events
+		WHERE ticker = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2
+	`, assetID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.SignalEvent
+	for rows.Next() {
+		var (
+			item       domain.SignalEvent
+			rawPayload []byte
+			ik         sql.NullString
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.SignalRunID,
+			&item.EventType,
+			&item.ModelVersion,
+			&item.Ticker,
+			&ik,
+			&rawPayload,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.IdempotencyKey = ik.String
+		if len(rawPayload) > 0 {
+			_ = json.Unmarshal(rawPayload, &item.Payload)
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}

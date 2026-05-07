@@ -142,6 +142,61 @@ type SignalOutcome struct {
 	UpdatedAt       time.Time
 }
 
+type SignalEvent struct {
+	ID             int64          `json:"id"`
+	SignalRunID    *int64         `json:"signal_run_id,omitempty"`
+	EventType      string         `json:"event_type"`
+	ModelVersion   string         `json:"model_version"`
+	Ticker         string         `json:"ticker,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type NotificationRule struct {
+	ID              int64     `json:"id"`
+	Ticker          string    `json:"ticker,omitempty"`
+	EventType       string    `json:"event_type"`
+	Severity        string    `json:"severity"`
+	Direction       string    `json:"direction,omitempty"`
+	ModelVersion    string    `json:"model_version,omitempty"`
+	Threshold       float64   `json:"threshold,omitempty"`
+	IsEnabled       bool      `json:"is_enabled"`
+	CooldownMinutes int       `json:"cooldown_minutes"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type NotificationEvent struct {
+	ID               int64          `json:"id"`
+	RuleID           int64          `json:"rule_id"`
+	SignalEventID    *int64         `json:"signal_event_id,omitempty"`
+	EventType        string         `json:"event_type"`
+	Severity         string         `json:"severity"`
+	ModelVersion     string         `json:"model_version"`
+	Ticker           string         `json:"ticker,omitempty"`
+	Message          string         `json:"message"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	DeliveryStatus   string         `json:"delivery_status"`
+	DeliveryAttempts int            `json:"delivery_attempts"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
+const (
+	SeverityInfo     = "info"
+	SeverityWarning  = "warning"
+	SeverityCritical = "critical"
+)
+
+const (
+	SignalEventClassificationSuccess        = "classification_success"
+	SignalEventInferenceBlockedByRuntime    = "inference_blocked_by_runtime"
+	SignalEventDecisionThresholdTriggered   = "decision_threshold_triggered"
+	SignalEventPolicyPromotion              = "policy_promotion"
+	SignalEventPolicyRollback               = "policy_rollback"
+	SignalEventModelActivated               = "model_activated"
+)
+
 type SignalPolicySnapshot struct {
 	PolicyStatus      string
 	ModelName         string
@@ -155,6 +210,7 @@ type PolicyValidationRun struct {
 	ID                int64
 	PolicyStatus      string
 	ModelName         string
+	ModelVersion      string
 	ScenarioName      string
 	CalibrationMethod string
 	Threshold         float64
@@ -164,6 +220,17 @@ type PolicyValidationRun struct {
 	DecisionState     string
 	Notes             string
 	CreatedAt         time.Time
+}
+
+type PolicyPromotionLog struct {
+	ID                    int64          `json:"id"`
+	PolicyValidationRunID int64          `json:"policy_validation_run_id"`
+	Actor                 string         `json:"actor"`
+	PreviousState         string         `json:"previous_state"`
+	NextState             string         `json:"next_state"`
+	Blockers              []string       `json:"blockers,omitempty"`
+	Notes                 string         `json:"notes,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
 }
 
 type PolicyValidationMetrics struct {
@@ -247,7 +314,9 @@ type JobRun struct {
 }
 
 const (
-	ModelStatusActive = "active"
+	ModelStatusActive   = "active"
+	ModelStatusInactive = "inactive"
+	ModelStatusArchived = "archived"
 
 	SignalStateActionable = "actionable"
 	SignalStateNoTrade    = "no_trade"
@@ -258,8 +327,11 @@ const (
 
 	PolicyDecisionCandidate  = "candidate"
 	PolicyDecisionShadowLive = "shadow_live"
-	PolicyDecisionPromoted   = "promoted"
+	PolicyDecisionApproved   = "approved"
+	PolicyDecisionActive     = "active"
 	PolicyDecisionBlocked    = "blocked"
+	PolicyDecisionArchived   = "archived"
+	PolicyDecisionPromoted   = "promoted" // Legacy alias for Active
 
 	JobStatusRunning   = "running"
 	JobStatusSucceeded = "succeeded"

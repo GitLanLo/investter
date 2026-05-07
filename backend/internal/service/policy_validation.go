@@ -87,6 +87,7 @@ func (s *PolicyValidationService) CreateFromCurrentPolicy(ctx context.Context, n
 	return s.repo.Create(ctx, domain.PolicyValidationRun{
 		PolicyStatus:      policy.PolicyStatus,
 		ModelName:         policy.ModelName,
+		ModelVersion:      policy.ModelVersion,
 		ScenarioName:      policy.ScenarioName,
 		CalibrationMethod: policy.CalibrationMethod,
 		Threshold:         policy.Threshold,
@@ -147,8 +148,11 @@ func isValidPolicyDecisionState(decisionState string) bool {
 	switch decisionState {
 	case domain.PolicyDecisionCandidate,
 		domain.PolicyDecisionShadowLive,
+		domain.PolicyDecisionApproved,
+		domain.PolicyDecisionActive,
 		domain.PolicyDecisionPromoted,
-		domain.PolicyDecisionBlocked:
+		domain.PolicyDecisionBlocked,
+		domain.PolicyDecisionArchived:
 		return true
 	default:
 		return false
@@ -199,6 +203,88 @@ func (s *PolicyValidationService) LoadShadowSummary(ctx context.Context, limit i
 	if summary.SignalsTotal > 0 {
 		summary.ObservedCoverage = float64(summary.ActionableSignals) / float64(summary.SignalsTotal)
 	}
+	return summary, nil
+}
+
+func (s *PolicyValidationService) LoadOutcomeSummaryByID(ctx context.Context, runID int64, limit int) (domain.PolicyOutcomeSummary, error) {
+	if s == nil || s.repo == nil || s.signals == nil || s.assets == nil || s.market == nil {
+		return domain.PolicyOutcomeSummary{}, ErrPolicyValidationUnavailable
+	}
+	if limit <= 0 || limit > 5000 {
+		limit = 1000
+	}
+
+	selected, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.PolicyOutcomeSummary{}, ErrPolicyValidationRunNotFound
+		}
+		return domain.PolicyOutcomeSummary{}, err
+	}
+
+	signals, err := s.signals.ListByPolicySnapshot(
+		ctx,
+		selected.ModelName,
+		selected.CalibrationMethod,
+		selected.DatasetVersion,
+		limit,
+	)
+	if err != nil {
+		return domain.PolicyOutcomeSummary{}, err
+	}
+
+	persistedOutcomes, err := s.loadPersistedOutcomeIndex(ctx, selected, limit)
+	if err != nil {
+		return domain.PolicyOutcomeSummary{}, err
+	}
+
+	summary := domain.PolicyOutcomeSummary{
+		ValidationRunID:   selected.ID,
+		DecisionState:     selected.DecisionState,
+		ModelName:         selected.ModelName,
+		CalibrationMethod: selected.CalibrationMethod,
+		Threshold:         selected.Threshold,
+		DatasetVersion:    selected.DatasetVersion,
+		SignalsTotal:      len(signals),
+	}
+	now := policyValidationNow()
+	var returnPctSum float64
+	var actionReturnPctSum float64
+	for _, signal := range signals {
+		if signal.SignalState == domain.SignalStateActionable {
+			summary.ActionableSignals++
+		}
+		if summary.LastSignalAt.IsZero() || signal.AsOfTime.After(summary.LastSignalAt) {
+			summary.LastSignalAt = signal.AsOfTime
+		}
+
+		if persisted, ok := persistedOutcomes[signal.ID]; ok {
+			accumulateOutcome(&summary, signal, persisted, &returnPctSum, &actionReturnPctSum)
+			continue
+		}
+
+		outcome, ok, err := s.realizedSignalOutcome(ctx, signal)
+		if err != nil {
+			return domain.PolicyOutcomeSummary{}, err
+		}
+		if !ok {
+			summary.PendingSignals++
+			if signalOutcomeOverdue(signal, now) {
+				summary.OverduePendingSignals++
+			}
+			continue
+		}
+		accumulateOutcome(&summary, signal, toPersistedOutcome(signal, outcome), &returnPctSum, &actionReturnPctSum)
+	}
+	if summary.HitSignals+summary.MissSignals > 0 {
+		summary.RealizedPrecision = float64(summary.HitSignals) / float64(summary.HitSignals+summary.MissSignals)
+		summary.AverageActionReturnPct = actionReturnPctSum / float64(summary.HitSignals+summary.MissSignals)
+	}
+	if summary.MaturedSignals > 0 {
+		summary.AverageReturnPct = returnPctSum / float64(summary.MaturedSignals)
+	}
+	summary.PromotionBlockers = buildPromotionBlockers(summary, now)
+	summary.CanPromote = len(summary.PromotionBlockers) == 0
 	return summary, nil
 }
 
