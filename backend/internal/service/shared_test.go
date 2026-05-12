@@ -39,11 +39,14 @@ func (m *MockAssetRepo) Upsert(ctx context.Context, asset domain.Asset) error {
 }
 
 type MockMarketDataRepo struct {
-	Candles map[string][]domain.Candle
-	Factors []domain.FactorBar
+	Candles             map[string][]domain.Candle
+	Factors             []domain.FactorBar
+	LastListTimeframe   string
+	LastAppendTimeframe string
 }
 
 func (m *MockMarketDataRepo) ListCandles(ctx context.Context, ticker string, timeframe string, from time.Time, to time.Time, limit int) ([]domain.Candle, error) {
+	m.LastListTimeframe = timeframe
 	cands := m.Candles[ticker]
 	filtered := make([]domain.Candle, 0)
 	for _, c := range cands {
@@ -83,6 +86,7 @@ func (m *MockMarketDataRepo) AppendCandles(ctx context.Context, ticker string, t
 	if m.Candles == nil {
 		m.Candles = make(map[string][]domain.Candle)
 	}
+	m.LastAppendTimeframe = timeframe
 	m.Candles[ticker] = append(m.Candles[ticker], candles...)
 	return nil
 }
@@ -96,8 +100,8 @@ type MockWatchlistRepo struct {
 	Items []domain.WatchlistItem
 }
 
-func (m *MockWatchlistRepo) GetOrCreateByName(ctx context.Context, name string) (domain.Watchlist, error) {
-	return domain.Watchlist{ID: 1, Name: name}, nil
+func (m *MockWatchlistRepo) GetOrCreateByName(ctx context.Context, userID int64, name string) (domain.Watchlist, error) {
+	return domain.Watchlist{ID: 1, Name: name, UserID: userID}, nil
 }
 
 func (m *MockWatchlistRepo) ListItems(ctx context.Context, watchlistID int64) ([]domain.WatchlistItem, error) {
@@ -105,6 +109,10 @@ func (m *MockWatchlistRepo) ListItems(ctx context.Context, watchlistID int64) ([
 }
 
 func (m *MockWatchlistRepo) AddItem(ctx context.Context, watchlistID int64, assetID string, position int) error {
+	return nil
+}
+
+func (m *MockWatchlistRepo) RemoveItem(ctx context.Context, watchlistID int64, assetID string) error {
 	return nil
 }
 
@@ -154,18 +162,18 @@ func (m *MockSignalRepo) Create(ctx context.Context, run domain.SignalRun) (doma
 	return run, nil
 }
 
-func (m *MockSignalRepo) ListLatest(ctx context.Context, limit int) ([]domain.SignalRun, error) {
+func (m *MockSignalRepo) ListLatest(ctx context.Context, userID int64, limit int) ([]domain.SignalRun, error) {
 	if limit <= 0 || limit > len(m.Latest) {
 		limit = len(m.Latest)
 	}
 	return m.Latest[:limit], nil
 }
 
-func (m *MockSignalRepo) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+func (m *MockSignalRepo) ListByAsset(ctx context.Context, userID int64, assetID string, limit int) ([]domain.SignalRun, error) {
 	return m.Signals[assetID], nil
 }
 
-func (m *MockSignalRepo) ListByPolicySnapshot(ctx context.Context, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalRun, error) {
+func (m *MockSignalRepo) ListByPolicySnapshot(ctx context.Context, userID int64, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalRun, error) {
 	return nil, nil
 }
 
@@ -243,11 +251,11 @@ func (m *MockSignalEventRepo) Upsert(ctx context.Context, event domain.SignalEve
 	return event, nil
 }
 
-func (m *MockSignalEventRepo) ListLatest(ctx context.Context, limit int) ([]domain.SignalEvent, error) {
+func (m *MockSignalEventRepo) ListLatest(ctx context.Context, userID int64, limit int) ([]domain.SignalEvent, error) {
 	return m.Events, nil
 }
 
-func (m *MockSignalEventRepo) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error) {
+func (m *MockSignalEventRepo) ListByAsset(ctx context.Context, userID int64, assetID string, limit int) ([]domain.SignalEvent, error) {
 	var filtered []domain.SignalEvent
 	for _, e := range m.Events {
 		if e.Ticker == assetID {
@@ -265,13 +273,13 @@ type MockNotificationRepo struct {
 	Events []domain.NotificationEvent
 }
 
-func (r *MockNotificationRepo) ListRules(ctx context.Context) ([]domain.NotificationRule, error) {
+func (r *MockNotificationRepo) ListRules(ctx context.Context, userID int64) ([]domain.NotificationRule, error) {
 	return r.Rules, nil
 }
 func (r *MockNotificationRepo) ListActiveRules(ctx context.Context) ([]domain.NotificationRule, error) {
 	return r.Rules, nil
 }
-func (r *MockNotificationRepo) GetRuleByID(ctx context.Context, id int64) (domain.NotificationRule, error) {
+func (r *MockNotificationRepo) GetRuleByID(ctx context.Context, id int64, userID int64) (domain.NotificationRule, error) {
 	return domain.NotificationRule{}, nil
 }
 func (r *MockNotificationRepo) CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
@@ -282,7 +290,7 @@ func (r *MockNotificationRepo) CreateRule(ctx context.Context, rule domain.Notif
 func (r *MockNotificationRepo) UpdateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
 	return rule, nil
 }
-func (r *MockNotificationRepo) DeleteRule(ctx context.Context, id int64) error {
+func (r *MockNotificationRepo) DeleteRule(ctx context.Context, id int64, userID int64) error {
 	return nil
 }
 func (r *MockNotificationRepo) CreateEvent(ctx context.Context, event domain.NotificationEvent) (domain.NotificationEvent, error) {
@@ -297,7 +305,7 @@ func (r *MockNotificationRepo) CreateEvent(ctx context.Context, event domain.Not
 	r.Events = append(r.Events, event)
 	return event, nil
 }
-func (r *MockNotificationRepo) ListLatestEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error) {
+func (r *MockNotificationRepo) ListLatestEvents(ctx context.Context, userID int64, limit int) ([]domain.NotificationEvent, error) {
 	return r.Events, nil
 }
 func (r *MockNotificationRepo) GetLatestEventForRule(ctx context.Context, ruleID int64) (domain.NotificationEvent, error) {
@@ -353,4 +361,17 @@ func (r *MockPolicyRepo) DemoteCurrentAndPromote(ctx context.Context, targetRunI
 
 func (r *MockPolicyRepo) LogPromotion(ctx context.Context, log domain.PolicyPromotionLog) error {
 	return nil
+}
+
+type MockSignalOutcomeRepo struct {
+	Outcomes []domain.SignalOutcome
+}
+
+func (m *MockSignalOutcomeRepo) Upsert(ctx context.Context, outcome domain.SignalOutcome) (domain.SignalOutcome, error) {
+	m.Outcomes = append(m.Outcomes, outcome)
+	return outcome, nil
+}
+
+func (m *MockSignalOutcomeRepo) ListByPolicySnapshot(ctx context.Context, userID int64, modelName string, calibrationMethod string, datasetVersion string, limit int) ([]domain.SignalOutcome, error) {
+	return m.Outcomes, nil
 }

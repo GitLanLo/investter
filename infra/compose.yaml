@@ -37,6 +37,7 @@ services:
       ML_MODEL_ROOT: /workspace/artifacts/models
       ML_RESEARCH_ROOT: /workspace/artifacts/research
       ML_UNIVERSE_CONFIG: /workspace/configs/mvp_universe_v1.json
+      TINKOFF_INVEST_TARGET: ${TINKOFF_INVEST_TARGET:-prod}
       TINKOFF_CA_CERT_FILE: ${TINKOFF_CA_CERT_FILE:-/workspace/certs/russian_trusted_root_ca.pem}
     ports:
       - "${BACKEND_PORT:-8080}:8080"

@@ -32,6 +32,8 @@ func (s *WatchlistRefreshScheduler) Start(ctx context.Context) {
 	if s == nil || s.svc == nil || s.interval <= 0 {
 		return
 	}
+	// Run initial refresh immediately
+	go s.runOnce(ctx, "initial")
 	go s.run(ctx)
 }
 
@@ -90,6 +92,8 @@ func (s *WatchlistSignalScheduler) Start(ctx context.Context) {
 	if s == nil || s.svc == nil || s.interval <= 0 {
 		return
 	}
+	// Run initial signal generation immediately
+	go s.runOnce(ctx, "initial")
 	go s.run(ctx)
 }
 

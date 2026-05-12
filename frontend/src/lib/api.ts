@@ -53,8 +53,47 @@ import type {
   NotificationEventDTO,
 } from "./types";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080") + "/api/v1";
 const artifactPreviewLimit = 24000;
+
+async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
+  const accessToken = localStorage.getItem("access_token");
+  const headers = new Headers(init?.headers);
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+
+  let response = await fetch(url, { ...init, headers });
+
+  if (response.status === 401) {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (refreshToken) {
+      const refreshResponse = await fetch(`${apiBaseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("refresh_token", data.refresh_token);
+
+        headers.set("Authorization", `Bearer ${data.access_token}`);
+        response = await fetch(url, { ...init, headers });
+      } else {
+        localStorage.clear();
+        window.location.href = "/login";
+        return response; // Return the original 401
+      }
+    } else {
+      localStorage.clear();
+      window.location.href = "/login";
+    }
+  }
+
+  return response;
+}
 
 export function formatProbability(value: number | undefined): string {
   if (value === undefined || Number.isNaN(value)) {
@@ -73,12 +112,12 @@ export function formatMetric(value: number | undefined, digits = 3): string {
 export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
   try {
     const [documents, assets, signals, overview, productionPolicy, activeModel] = await Promise.all([
-      fetchJson<ResearchDocumentsResponseDTO>("/ml/research/documents"),
+      fetchJson<ResearchDocumentsResponseDTO>("/admin/ml/research/documents"),
       fetchJson<{ items: AssetDTO[] }>("/assets"),
       fetchJson<{ items: SignalDTO[] }>("/signals/latest?limit=12"),
-      fetchJson<ResearchOverviewDTO>("/ml/research/overview"),
-      fetchJson<ProductionPolicyDTO>("/ml/policy/production"),
-      fetchJson<MLModelManifestDTO>("/ml/models/active").catch(() => undefined),
+      fetchJson<ResearchOverviewDTO>("/admin/ml/research/overview"),
+      fetchJson<ProductionPolicyDTO>("/admin/ml/policy/production"),
+      fetchJson<MLModelManifestDTO>("/admin/ml/models/active").catch(() => undefined),
     ]);
     const [
       validationRuns,
@@ -94,18 +133,18 @@ export async function loadWorkspaceShell(): Promise<WorkspaceShellData> {
       notifRules,
       notifEvents,
     ] = await Promise.all([
-      fetchJson<{ items: PolicyValidationRunDTO[] }>("/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
-      fetchJson<PolicyShadowSummaryDTO>("/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
-      fetchJson<PolicyOutcomeSummaryDTO>("/ml/policy/outcomes?limit=1000").catch(() => undefined),
-      fetchJson<{ items: PolicyOutcomeRecordDTO[] }>("/ml/policy/outcomes/history?limit=12").catch(() => ({ items: [] })),
+      fetchJson<{ items: PolicyValidationRunDTO[] }>("/admin/ml/policy/validation-runs?limit=8").catch(() => ({ items: [] })),
+      fetchJson<PolicyShadowSummaryDTO>("/admin/ml/policy/shadow-summary?limit=1000").catch(() => undefined),
+      fetchJson<PolicyOutcomeSummaryDTO>("/admin/ml/policy/outcomes?limit=1000").catch(() => undefined),
+      fetchJson<{ items: PolicyOutcomeRecordDTO[] }>("/admin/ml/policy/outcomes/history?limit=12").catch(() => ({ items: [] })),
       fetchJson<{ items: JobRunDTO[] }>("/jobs/runs?limit=12").catch(() => ({ items: [] })),
       fetchJson<JobSchedulerStatusDTO>("/jobs/scheduler").catch(() => undefined),
       fetchJson<FreshnessSummaryDTO>("/watchlist/freshness").catch(() => undefined),
       fetchJson<SchedulersResponse>("/jobs/schedulers").catch(() => undefined),
-      fetchJson<MonitoringSummary>("/ml/monitoring/summary").catch(() => undefined),
-      fetchJson<{ items: SignalEventDTO[] }>("/ml/events?limit=20").catch(() => ({ items: [] })),
-      fetchJson<{ items: NotificationRuleDTO[] }>("/ml/notifications/rules").catch(() => ({ items: [] })),
-      fetchJson<{ items: NotificationEventDTO[] }>("/ml/notifications/events?limit=20").catch(() => ({ items: [] })),
+      fetchJson<MonitoringSummary>("/admin/ml/monitoring/summary").catch(() => undefined),
+      fetchJson<{ items: SignalEventDTO[] }>("/alerts/signal-events?limit=20").catch(() => ({ items: [] })),
+      fetchJson<{ items: NotificationRuleDTO[] }>("/alerts/rules").catch(() => ({ items: [] })),
+      fetchJson<{ items: NotificationEventDTO[] }>("/alerts/events?limit=20").catch(() => ({ items: [] })),
     ]);
 
     return {
@@ -181,7 +220,7 @@ export async function loadAssetWorkbench(
 }
 
 export async function runAnalysisForAsset(assetId: string, timeframe: string): Promise<SignalCard> {
-  const response = await fetch(`${apiBaseUrl}/analysis/run`, {
+  const response = await fetchWithAuth(`${apiBaseUrl}/assets/${assetId}/analysis/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -201,7 +240,7 @@ export async function runAnalysisForAsset(assetId: string, timeframe: string): P
 }
 
 export async function createPolicyValidationRun(notes: string): Promise<PolicyValidationRun> {
-  const response = await fetch(`${apiBaseUrl}/ml/policy/validation-runs`, {
+  const response = await fetchWithAuth(`${apiBaseUrl}/admin/ml/policy/validation-runs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -221,7 +260,7 @@ export async function updatePolicyValidationRun(
   decisionState: string,
   notes: string,
 ): Promise<PolicyValidationRun> {
-  const response = await fetch(`${apiBaseUrl}/ml/policy/validation-runs/${id}`, {
+  const response = await fetchWithAuth(`${apiBaseUrl}/admin/ml/policy/validation-runs/${id}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -240,7 +279,7 @@ export async function updatePolicyValidationRun(
 }
 
 export async function runOutcomeMaterializationJob(): Promise<JobRun> {
-  const response = await fetch(`${apiBaseUrl}/jobs/outcomes/materialize?limit=1000`, {
+  const response = await fetchWithAuth(`${apiBaseUrl}/jobs/outcomes/materialize?limit=1000`, {
     method: "POST",
   });
 
@@ -461,8 +500,8 @@ function mapJobSchedulerStatus(dto: JobSchedulerStatusDTO): JobSchedulerStatus {
   };
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`);
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetchWithAuth(`${apiBaseUrl}${path}`, init);
   if (!response.ok) {
     let errMsg = `request failed for ${path}: ${response.status}`;
     try {
@@ -711,7 +750,7 @@ export async function searchInstruments(query: string): Promise<InstrumentCard[]
 }
 
 export async function addInstrumentToWatchlist(instrumentUid: string, position: number = 0): Promise<void> {
-  const response = await fetch(`${apiBaseUrl}/watchlist`, {
+  const response = await fetchWithAuth(`${apiBaseUrl}/watchlist`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instrument_uid: instrumentUid, position }),
@@ -742,13 +781,13 @@ function mapInstrument(dto: InstrumentDTO): InstrumentCard {
 // Sprint 6: Freshness & Watchlist Job API
 
 export async function triggerWatchlistRefresh(): Promise<JobRun> {
-  const response = await fetch(`${apiBaseUrl}/jobs/data-refresh`, { method: "POST" });
+  const response = await fetchWithAuth(`${apiBaseUrl}/jobs/data-refresh`, { method: "POST" });
   if (!response.ok) throw new Error(`watchlist refresh failed: ${response.status}`);
   return mapJobRun((await response.json()) as JobRunDTO);
 }
 
 export async function triggerWatchlistSignalRefresh(): Promise<JobRun> {
-  const response = await fetch(`${apiBaseUrl}/jobs/signals/run`, { method: "POST" });
+  const response = await fetchWithAuth(`${apiBaseUrl}/jobs/signals/run`, { method: "POST" });
   if (!response.ok) throw new Error(`watchlist signal refresh failed: ${response.status}`);
   return mapJobRun((await response.json()) as JobRunDTO);
 }
@@ -787,6 +826,8 @@ function mapFreshnessItem(dto: FreshnessItemDTO): FreshnessItem {
     signalFresh: dto.signal_fresh,
     staleReason: dto.stale_reason,
     modelSupported: dto.model_supported,
+    lastPrice: dto.last_price,
+    priceChange: dto.price_change,
   };
 }
 

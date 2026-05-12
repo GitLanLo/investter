@@ -20,6 +20,7 @@ var (
 
 type RunAnalysisInput struct {
 	AssetID      string
+	UserID       int64
 	AsOfTime     time.Time
 	ModelVersion string
 	Timeframe    string
@@ -82,6 +83,7 @@ func (s *AnalysisService) Run(ctx context.Context, input RunAnalysisInput) (doma
 	if manifest.RuntimeStatus != RuntimeStatusAvailable {
 		if s.eventRepo != nil {
 			event := domain.SignalEvent{
+				UserID:         input.UserID,
 				EventType:      domain.SignalEventInferenceBlockedByRuntime,
 				ModelVersion:   entry.ModelVersion,
 				Ticker:         asset.Ticker,
@@ -110,6 +112,7 @@ func (s *AnalysisService) Run(ctx context.Context, input RunAnalysisInput) (doma
 
 	run := domain.SignalRun{
 		AssetID:            asset.ID,
+		UserID:             input.UserID,
 		ModelVersion:       manifest.ModelVersion,
 		AsOfTime:           asOfTime,
 		SignalState:        state,
@@ -131,6 +134,7 @@ func (s *AnalysisService) Run(ctx context.Context, input RunAnalysisInput) (doma
 			eventType = domain.SignalEventDecisionThresholdTriggered
 		}
 		event := domain.SignalEvent{
+			UserID:         res.UserID,
 			SignalRunID:    &res.ID,
 			EventType:      eventType,
 			ModelVersion:   res.ModelVersion,
@@ -151,7 +155,7 @@ func (s *AnalysisService) Run(ctx context.Context, input RunAnalysisInput) (doma
 	return res, err
 }
 
-func (s *AnalysisService) ListLatest(ctx context.Context, limit int) ([]domain.SignalRun, error) {
+func (s *AnalysisService) ListLatest(ctx context.Context, userID int64, limit int) ([]domain.SignalRun, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -159,10 +163,10 @@ func (s *AnalysisService) ListLatest(ctx context.Context, limit int) ([]domain.S
 		limit = 100
 	}
 
-	return s.signalRepo.ListLatest(ctx, limit)
+	return s.signalRepo.ListLatest(ctx, userID, limit)
 }
 
-func (s *AnalysisService) ListEvents(ctx context.Context, limit int) ([]domain.SignalEvent, error) {
+func (s *AnalysisService) ListEvents(ctx context.Context, userID int64, limit int) ([]domain.SignalEvent, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -170,10 +174,10 @@ func (s *AnalysisService) ListEvents(ctx context.Context, limit int) ([]domain.S
 		limit = 100
 	}
 
-	return s.eventRepo.ListLatest(ctx, limit)
+	return s.eventRepo.ListLatest(ctx, userID, limit)
 }
 
-func (s *AnalysisService) ListEventsByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error) {
+func (s *AnalysisService) ListEventsByAsset(ctx context.Context, userID int64, assetID string, limit int) ([]domain.SignalEvent, error) {
 	if assetID == "" {
 		return nil, errors.New("assetID must not be empty")
 	}
@@ -184,10 +188,10 @@ func (s *AnalysisService) ListEventsByAsset(ctx context.Context, assetID string,
 		limit = 100
 	}
 
-	return s.eventRepo.ListByAsset(ctx, assetID, limit)
+	return s.eventRepo.ListByAsset(ctx, userID, assetID, limit)
 }
 
-func (s *AnalysisService) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+func (s *AnalysisService) ListByAsset(ctx context.Context, userID int64, assetID string, limit int) ([]domain.SignalRun, error) {
 	if assetID == "" {
 		return nil, errors.New("assetID must not be empty")
 	}
@@ -198,7 +202,7 @@ func (s *AnalysisService) ListByAsset(ctx context.Context, assetID string, limit
 		limit = 200
 	}
 
-	return s.signalRepo.ListByAsset(ctx, assetID, limit)
+	return s.signalRepo.ListByAsset(ctx, userID, assetID, limit)
 }
 
 func (s *AnalysisService) resolveModel(ctx context.Context, version string) (domain.ModelRegistryEntry, error) {

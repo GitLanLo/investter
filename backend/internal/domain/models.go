@@ -2,6 +2,26 @@ package domain
 
 import "time"
 
+type User struct {
+	ID           int64     `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
+	Permissions  []string  `json:"permissions"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+const (
+	UserRoleUser       = "user"
+	UserRoleAdmin      = "admin"
+	UserRoleSuperAdmin = "super_admin"
+
+	PermissionMLAdmin      = "ml_admin"
+	PermissionUserAdmin    = "user_admin"
+	PermissionMarketAccess = "market_access"
+)
+
 type Asset struct {
 	ID                  string
 	Ticker              string
@@ -50,10 +70,11 @@ type FactorBar struct {
 }
 
 type Watchlist struct {
-	ID        int64
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	UserID    int64     `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type WatchlistItem struct {
@@ -115,6 +136,7 @@ type SignalClassProbabilities struct {
 type SignalRun struct {
 	ID                 int64
 	AssetID            string
+	UserID             int64
 	ModelVersion       string
 	AsOfTime           time.Time
 	SignalState        string
@@ -144,6 +166,7 @@ type SignalOutcome struct {
 
 type SignalEvent struct {
 	ID             int64          `json:"id"`
+	UserID         int64          `json:"user_id,omitempty"`
 	SignalRunID    *int64         `json:"signal_run_id,omitempty"`
 	EventType      string         `json:"event_type"`
 	ModelVersion   string         `json:"model_version"`
@@ -154,17 +177,24 @@ type SignalEvent struct {
 }
 
 type NotificationRule struct {
-	ID              int64     `json:"id"`
-	Ticker          string    `json:"ticker,omitempty"`
-	EventType       string    `json:"event_type"`
-	Severity        string    `json:"severity"`
-	Direction       string    `json:"direction,omitempty"`
-	ModelVersion    string    `json:"model_version,omitempty"`
-	Threshold       float64   `json:"threshold,omitempty"`
-	IsEnabled       bool      `json:"is_enabled"`
-	CooldownMinutes int       `json:"cooldown_minutes"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                 int64      `json:"id"`
+	UserID             int64      `json:"user_id"`
+	Ticker             string     `json:"ticker,omitempty"`
+	EventType          string     `json:"event_type"` // e.g., "price", "indicator", "signal"
+	TargetIndicator    string     `json:"target_indicator,omitempty"` // e.g., "RSI", "EMA"
+	Operator           string     `json:"operator,omitempty"`         // e.g., ">", "<", "cross_up", "cross_down"
+	Threshold          float64    `json:"threshold,omitempty"`
+	SecondaryThreshold float64    `json:"secondary_threshold,omitempty"` // for channels/ranges
+	Severity           string     `json:"severity"`
+	Direction          string     `json:"direction,omitempty"`
+	ModelVersion       string     `json:"model_version,omitempty"`
+	IsEnabled          bool       `json:"is_enabled"`
+	CooldownMinutes    int        `json:"cooldown_minutes"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
+	TriggerMode        string     `json:"trigger_mode"` // "once", "always", "not_more_than_n", "once_per_day"
+	DeliveryChannels   []string   `json:"delivery_channels"` // "app", "email", "telegram", "browser"
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type NotificationEvent struct {
@@ -189,12 +219,12 @@ const (
 )
 
 const (
-	SignalEventClassificationSuccess        = "classification_success"
-	SignalEventInferenceBlockedByRuntime    = "inference_blocked_by_runtime"
-	SignalEventDecisionThresholdTriggered   = "decision_threshold_triggered"
-	SignalEventPolicyPromotion              = "policy_promotion"
-	SignalEventPolicyRollback               = "policy_rollback"
-	SignalEventModelActivated               = "model_activated"
+	SignalEventClassificationSuccess      = "classification_success"
+	SignalEventInferenceBlockedByRuntime  = "inference_blocked_by_runtime"
+	SignalEventDecisionThresholdTriggered = "decision_threshold_triggered"
+	SignalEventPolicyPromotion            = "policy_promotion"
+	SignalEventPolicyRollback             = "policy_rollback"
+	SignalEventModelActivated             = "model_activated"
 )
 
 type SignalPolicySnapshot struct {
@@ -223,14 +253,14 @@ type PolicyValidationRun struct {
 }
 
 type PolicyPromotionLog struct {
-	ID                    int64          `json:"id"`
-	PolicyValidationRunID int64          `json:"policy_validation_run_id"`
-	Actor                 string         `json:"actor"`
-	PreviousState         string         `json:"previous_state"`
-	NextState             string         `json:"next_state"`
-	Blockers              []string       `json:"blockers,omitempty"`
-	Notes                 string         `json:"notes,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
+	ID                    int64     `json:"id"`
+	PolicyValidationRunID int64     `json:"policy_validation_run_id"`
+	Actor                 string    `json:"actor"`
+	PreviousState         string    `json:"previous_state"`
+	NextState             string    `json:"next_state"`
+	Blockers              []string  `json:"blockers,omitempty"`
+	Notes                 string    `json:"notes,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 type PolicyValidationMetrics struct {

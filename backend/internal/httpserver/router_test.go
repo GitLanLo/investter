@@ -17,6 +17,7 @@ import (
 	"invest/backend/internal/app"
 	"invest/backend/internal/config"
 	"invest/backend/internal/domain"
+	"invest/backend/internal/http/handlers"
 	"invest/backend/internal/repository"
 	"invest/backend/internal/repository/filesystem"
 	"invest/backend/internal/service"
@@ -93,7 +94,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		},
 	})
 
-	runReq := httptest.NewRequest(http.MethodPost, "/analysis/run", strings.NewReader(`{
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/assets/SBER/analysis/run", strings.NewReader(`{
 		"asset_id": "SBER",
 		"as_of_time": "2026-04-09T09:55:00Z",
 		"model_version": "active",
@@ -107,7 +108,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for POST /analysis/run: %d body=%s", runResp.Code, runResp.Body.String())
 	}
 
-	var created signalDTO
+	var created handlers.SignalDTO
 	if err := json.Unmarshal(runResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created signal: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		t.Fatalf("unexpected timeframe: %s", created.Timeframe)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/signals/latest?limit=10", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/signals/latest?limit=10", nil)
 	listResp := httptest.NewRecorder()
 	router.ServeHTTP(listResp, listReq)
 
@@ -129,7 +130,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /signals/latest: %d body=%s", listResp.Code, listResp.Body.String())
 	}
 
-	var listed signalsResponse
+	var listed handlers.SignalsResponse
 	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode signals list: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		t.Fatalf("unexpected listed asset_id: %s", listed.Items[0].AssetID)
 	}
 
-	historyReq := httptest.NewRequest(http.MethodGet, "/assets/SBER/signals?limit=10", nil)
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v1/assets/SBER/signals?limit=10", nil)
 	historyResp := httptest.NewRecorder()
 	router.ServeHTTP(historyResp, historyReq)
 
@@ -148,7 +149,7 @@ func TestAnalysisEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /assets/SBER/signals: %d body=%s", historyResp.Code, historyResp.Body.String())
 	}
 
-	var history signalsResponse
+	var history handlers.SignalsResponse
 	if err := json.Unmarshal(historyResp.Body.Bytes(), &history); err != nil {
 		t.Fatalf("decode signal history: %v", err)
 	}
@@ -183,7 +184,7 @@ func TestModelManifestEndpointsExposeSprint9RuntimeState(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/ml/models/active", "/ml/models/sprint8_gru_1h_h24_w96"} {
+	for _, path := range []string{"/api/v1/admin/ml/models/active", "/api/v1/admin/ml/models/sprint8_gru_1h_h24_w96"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -192,7 +193,7 @@ func TestModelManifestEndpointsExposeSprint9RuntimeState(t *testing.T) {
 			t.Fatalf("unexpected status for GET %s: %d body=%s", path, resp.Code, resp.Body.String())
 		}
 
-		var body mlModelManifestDTO
+		var body handlers.MLModelManifestDTO
 		if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode model manifest response: %v", err)
 		}
@@ -210,7 +211,7 @@ func TestModelManifestEndpointsExposeSprint9RuntimeState(t *testing.T) {
 		}
 	}
 
-	missingReq := httptest.NewRequest(http.MethodGet, "/ml/models/missing", nil)
+	missingReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/models/missing", nil)
 	missingResp := httptest.NewRecorder()
 	router.ServeHTTP(missingResp, missingReq)
 	if missingResp.Code != http.StatusNotFound {
@@ -242,7 +243,7 @@ func TestModelActivation(t *testing.T) {
 	})
 
 	t.Run("blocks metadata_only activation", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/ml/models/neural/activate", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/ml/models/neural/activate", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 
@@ -255,7 +256,7 @@ func TestModelActivation(t *testing.T) {
 	})
 
 	t.Run("allows available model activation", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/ml/models/next/activate", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/ml/models/next/activate", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 
@@ -323,14 +324,14 @@ func TestMarketDataEndpoints(t *testing.T) {
 		Container: app.Container{
 			Services: service.Services{
 				Assets:     service.NewAssetService(assetRepo),
-				MarketData: service.NewMarketDataService(assetRepo, filesystem.NewMarketDataRepository(dataRoot)),
+				MarketData: service.NewMarketDataService(assetRepo, filesystem.NewMarketDataRepository(dataRoot), &testSignalRepo{}, nil),
 			},
 		},
 	})
 
 	candlesReq := httptest.NewRequest(
 		http.MethodGet,
-		"/assets/SBER/candles?from=2026-04-09T09:55:00Z&to=2026-04-09T10:05:00Z&limit=2",
+		"/api/v1/assets/SBER/candles?from=2026-04-09T09:55:00Z&to=2026-04-09T10:05:00Z&limit=2",
 		nil,
 	)
 	candlesResp := httptest.NewRecorder()
@@ -340,7 +341,7 @@ func TestMarketDataEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /assets/{id}/candles: %d body=%s", candlesResp.Code, candlesResp.Body.String())
 	}
 
-	var candles candlesResponse
+	var candles handlers.CandlesResponse
 	if err := json.Unmarshal(candlesResp.Body.Bytes(), &candles); err != nil {
 		t.Fatalf("decode candles response: %v", err)
 	}
@@ -356,7 +357,7 @@ func TestMarketDataEndpoints(t *testing.T) {
 
 	factorsReq := httptest.NewRequest(
 		http.MethodGet,
-		"/assets/SBER/factors?from=2026-04-09T09:55:00Z&to=2026-04-09T10:00:00Z",
+		"/api/v1/assets/SBER/factors?from=2026-04-09T09:55:00Z&to=2026-04-09T10:00:00Z",
 		nil,
 	)
 	factorsResp := httptest.NewRecorder()
@@ -366,7 +367,7 @@ func TestMarketDataEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /assets/{id}/factors: %d body=%s", factorsResp.Code, factorsResp.Body.String())
 	}
 
-	var factors factorsResponse
+	var factors handlers.FactorsResponse
 	if err := json.Unmarshal(factorsResp.Body.Bytes(), &factors); err != nil {
 		t.Fatalf("decode factors response: %v", err)
 	}
@@ -444,7 +445,7 @@ func TestResearchOverviewEndpoint(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ml/research/overview", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/research/overview", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -452,7 +453,7 @@ func TestResearchOverviewEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/research/overview: %d body=%s", resp.Code, resp.Body.String())
 	}
 
-	var payload mlResearchOverviewResponse
+	var payload handlers.MLResearchOverviewResponse
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode research overview: %v", err)
 	}
@@ -515,7 +516,7 @@ func TestResearchDocumentsEndpoint(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ml/research/documents", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/research/documents", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -523,7 +524,7 @@ func TestResearchDocumentsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/research/documents: %d body=%s", resp.Code, resp.Body.String())
 	}
 
-	var payload mlResearchDocumentsResponse
+	var payload handlers.MLResearchDocumentsResponse
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode research documents: %v", err)
 	}
@@ -609,7 +610,7 @@ func TestProductionPolicyEndpoint(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ml/policy/production", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/policy/production", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -617,7 +618,7 @@ func TestProductionPolicyEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/policy/production: %d body=%s", resp.Code, resp.Body.String())
 	}
 
-	var payload mlProductionPolicyResponse
+	var payload handlers.MLProductionPolicyResponse
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode production policy: %v", err)
 	}
@@ -675,7 +676,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		},
 	})
 
-	searchReq := httptest.NewRequest(http.MethodGet, "/instruments/search?query=sbe", nil)
+	searchReq := httptest.NewRequest(http.MethodGet, "/api/v1/instruments/search?query=sbe", nil)
 	searchResp := httptest.NewRecorder()
 	router.ServeHTTP(searchResp, searchReq)
 
@@ -683,7 +684,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /instruments/search: %d body=%s", searchResp.Code, searchResp.Body.String())
 	}
 
-	var searchResult instrumentsSearchResponse
+	var searchResult handlers.InstrumentsSearchResponse
 	if err := json.Unmarshal(searchResp.Body.Bytes(), &searchResult); err != nil {
 		t.Fatalf("decode instruments search: %v", err)
 	}
@@ -691,7 +692,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected search result: %+v", searchResult)
 	}
 
-	detailsReq := httptest.NewRequest(http.MethodGet, "/instruments/uid-sber", nil)
+	detailsReq := httptest.NewRequest(http.MethodGet, "/api/v1/instruments/uid-sber", nil)
 	detailsResp := httptest.NewRecorder()
 	router.ServeHTTP(detailsResp, detailsReq)
 
@@ -699,7 +700,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /instruments/{uid}: %d body=%s", detailsResp.Code, detailsResp.Body.String())
 	}
 
-	var instrument instrumentDTO
+	var instrument handlers.InstrumentDTO
 	if err := json.Unmarshal(detailsResp.Body.Bytes(), &instrument); err != nil {
 		t.Fatalf("decode instrument details: %v", err)
 	}
@@ -707,7 +708,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected instrument payload: %+v", instrument)
 	}
 
-	addReq := httptest.NewRequest(http.MethodPost, "/watchlist", strings.NewReader(`{"instrument_uid":"uid-sber","position":2}`))
+	addReq := httptest.NewRequest(http.MethodPost, "/api/v1/watchlist", strings.NewReader(`{"instrument_uid":"uid-sber","position":2}`))
 	addReq.Header.Set("Content-Type", "application/json")
 	addResp := httptest.NewRecorder()
 	router.ServeHTTP(addResp, addReq)
@@ -716,18 +717,18 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for POST /watchlist: %d body=%s", addResp.Code, addResp.Body.String())
 	}
 
-	var created watchlistResponse
+	var created handlers.WatchlistResponse
 	if err := json.Unmarshal(addResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode watchlist create response: %v", err)
 	}
-	if len(created.Items) != 1 || created.Items[0].AssetID != "uid-sber" {
+	if len(created.Items) != 1 || created.Items[0].AssetID != "SBER" {
 		t.Fatalf("unexpected watchlist payload: %+v", created)
 	}
 	if created.Items[0].Asset == nil || created.Items[0].Asset.Ticker != "SBER" || !created.Items[0].Asset.APITradeAvailable {
 		t.Fatalf("expected enriched asset metadata in watchlist item, got %+v", created.Items[0])
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/watchlist", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/watchlist", nil)
 	listResp := httptest.NewRecorder()
 	router.ServeHTTP(listResp, listReq)
 
@@ -735,7 +736,7 @@ func TestInstrumentCatalogEndpoints(t *testing.T) {
 		t.Fatalf("unexpected status for GET /watchlist: %d body=%s", listResp.Code, listResp.Body.String())
 	}
 
-	var listed watchlistResponse
+	var listed handlers.WatchlistResponse
 	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode watchlist response: %v", err)
 	}
@@ -850,7 +851,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 
 	createReq := httptest.NewRequest(
 		http.MethodPost,
-		"/ml/policy/validation-runs",
+		"/api/v1/admin/ml/policy/validation-runs",
 		strings.NewReader(`{"notes":"shadow candidate"}`),
 	)
 	createResp := httptest.NewRecorder()
@@ -860,7 +861,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for POST /ml/policy/validation-runs: %d body=%s", createResp.Code, createResp.Body.String())
 	}
 
-	var created mlPolicyValidationRunDTO
+	var created handlers.MLPolicyValidationRunDTO
 	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created policy validation run: %v", err)
 	}
@@ -871,7 +872,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected validation run details: %+v", created)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/ml/policy/validation-runs?limit=5", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/policy/validation-runs?limit=5", nil)
 	listResp := httptest.NewRecorder()
 	router.ServeHTTP(listResp, listReq)
 
@@ -879,7 +880,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/policy/validation-runs: %d body=%s", listResp.Code, listResp.Body.String())
 	}
 
-	var listed mlPolicyValidationRunsResponse
+	var listed handlers.MLPolicyValidationRunsResponse
 	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode policy validation runs: %v", err)
 	}
@@ -889,7 +890,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 
 	updateReq := httptest.NewRequest(
 		http.MethodPatch,
-		"/ml/policy/validation-runs/1",
+		"/api/v1/admin/ml/policy/validation-runs/1",
 		strings.NewReader(`{"decision_state":"shadow_live","notes":"approved for shadow live"}`),
 	)
 	updateResp := httptest.NewRecorder()
@@ -899,7 +900,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for PATCH /ml/policy/validation-runs/1: %d body=%s", updateResp.Code, updateResp.Body.String())
 	}
 
-	var updated mlPolicyValidationRunDTO
+	var updated handlers.MLPolicyValidationRunDTO
 	if err := json.Unmarshal(updateResp.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode updated policy validation run: %v", err)
 	}
@@ -956,7 +957,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		},
 	})
 
-	shadowReq := httptest.NewRequest(http.MethodGet, "/ml/policy/shadow-summary", nil)
+	shadowReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/policy/shadow-summary", nil)
 	shadowResp := httptest.NewRecorder()
 	router.ServeHTTP(shadowResp, shadowReq)
 
@@ -964,7 +965,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/policy/shadow-summary: %d body=%s", shadowResp.Code, shadowResp.Body.String())
 	}
 
-	var shadow mlPolicyShadowSummaryDTO
+	var shadow handlers.MLPolicyShadowSummaryDTO
 	if err := json.Unmarshal(shadowResp.Body.Bytes(), &shadow); err != nil {
 		t.Fatalf("decode policy shadow summary: %v", err)
 	}
@@ -972,7 +973,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected shadow summary: %+v", shadow)
 	}
 
-	outcomeMaterializeReq := httptest.NewRequest(http.MethodPost, "/ml/policy/outcomes?limit=10", nil)
+	outcomeMaterializeReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/ml/policy/outcomes?limit=10", nil)
 	outcomeMaterializeResp := httptest.NewRecorder()
 	router.ServeHTTP(outcomeMaterializeResp, outcomeMaterializeReq)
 
@@ -984,7 +985,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("expected 1 persisted outcome, got %d", len(outcomeRepo.items))
 	}
 
-	outcomeReq := httptest.NewRequest(http.MethodGet, "/ml/policy/outcomes", nil)
+	outcomeReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/policy/outcomes", nil)
 	outcomeResp := httptest.NewRecorder()
 	router.ServeHTTP(outcomeResp, outcomeReq)
 
@@ -992,7 +993,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/policy/outcomes: %d body=%s", outcomeResp.Code, outcomeResp.Body.String())
 	}
 
-	var outcomes mlPolicyOutcomeSummaryDTO
+	var outcomes handlers.MLPolicyOutcomeSummaryDTO
 	if err := json.Unmarshal(outcomeResp.Body.Bytes(), &outcomes); err != nil {
 		t.Fatalf("decode policy outcomes: %v", err)
 	}
@@ -1018,7 +1019,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("expected positive action return, got %+v", outcomes)
 	}
 
-	outcomeHistoryReq := httptest.NewRequest(http.MethodGet, "/ml/policy/outcomes/history?limit=10", nil)
+	outcomeHistoryReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ml/policy/outcomes/history?limit=10", nil)
 	outcomeHistoryResp := httptest.NewRecorder()
 	router.ServeHTTP(outcomeHistoryResp, outcomeHistoryReq)
 
@@ -1026,7 +1027,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /ml/policy/outcomes/history: %d body=%s", outcomeHistoryResp.Code, outcomeHistoryResp.Body.String())
 	}
 
-	var history mlPolicyOutcomeHistoryResponse
+	var history handlers.MLPolicyOutcomeHistoryResponse
 	if err := json.Unmarshal(outcomeHistoryResp.Body.Bytes(), &history); err != nil {
 		t.Fatalf("decode policy outcome history: %v", err)
 	}
@@ -1037,7 +1038,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected outcome history item: %+v", history.Items[0])
 	}
 
-	jobReq := httptest.NewRequest(http.MethodPost, "/jobs/outcomes/materialize?limit=10", nil)
+	jobReq := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/outcomes/materialize?limit=10", nil)
 	jobResp := httptest.NewRecorder()
 	router.ServeHTTP(jobResp, jobReq)
 
@@ -1045,7 +1046,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for POST /jobs/outcomes/materialize: %d body=%s", jobResp.Code, jobResp.Body.String())
 	}
 
-	var job jobRunDTO
+	var job handlers.JobRunDTO
 	if err := json.Unmarshal(jobResp.Body.Bytes(), &job); err != nil {
 		t.Fatalf("decode job run response: %v", err)
 	}
@@ -1053,7 +1054,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected job run payload: %+v", job)
 	}
 
-	jobsListReq := httptest.NewRequest(http.MethodGet, "/jobs/runs?limit=5", nil)
+	jobsListReq := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/runs?limit=5", nil)
 	jobsListResp := httptest.NewRecorder()
 	router.ServeHTTP(jobsListResp, jobsListReq)
 
@@ -1061,7 +1062,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /jobs/runs: %d body=%s", jobsListResp.Code, jobsListResp.Body.String())
 	}
 
-	var jobs jobRunsResponse
+	var jobs handlers.JobRunsResponse
 	if err := json.Unmarshal(jobsListResp.Body.Bytes(), &jobs); err != nil {
 		t.Fatalf("decode jobs list: %v", err)
 	}
@@ -1069,7 +1070,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected jobs list payload: %+v", jobs)
 	}
 
-	schedulerReq := httptest.NewRequest(http.MethodGet, "/jobs/scheduler", nil)
+	schedulerReq := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/scheduler", nil)
 	schedulerResp := httptest.NewRecorder()
 	router.ServeHTTP(schedulerResp, schedulerReq)
 
@@ -1077,7 +1078,7 @@ func TestPolicyValidationRunsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status for GET /jobs/scheduler: %d body=%s", schedulerResp.Code, schedulerResp.Body.String())
 	}
 
-	var scheduler jobSchedulerStatusDTO
+	var scheduler handlers.JobSchedulerStatusDTO
 	if err := json.Unmarshal(schedulerResp.Body.Bytes(), &scheduler); err != nil {
 		t.Fatalf("decode scheduler status: %v", err)
 	}
@@ -1104,7 +1105,7 @@ func TestSprint6Endpoints(t *testing.T) {
 
 	refreshSvc := service.NewWatchlistRefreshService(
 		watchlistRepo, assetRepo, &testMarketDataRepo{}, jobRepo, &testSignalRepo{},
-		nil, instruments, nil,
+		nil, instruments, nil, "", nil,
 	)
 
 	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{
@@ -1117,7 +1118,7 @@ func TestSprint6Endpoints(t *testing.T) {
 	})
 
 	// Test aliases
-	endpoints := []string{"/jobs/data-refresh", "/jobs/signals/run"}
+	endpoints := []string{"/api/v1/jobs/data-refresh", "/api/v1/jobs/signals/run"}
 	for _, ep := range endpoints {
 		req := httptest.NewRequest(http.MethodPost, ep, nil)
 		resp := httptest.NewRecorder()
@@ -1135,7 +1136,7 @@ func TestCORSPreflight(t *testing.T) {
 		Container: app.Container{},
 	})
 
-	req := httptest.NewRequest(http.MethodOptions, "/analysis/run", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/assets/SBER/analysis/run", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:5173")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
 	resp := httptest.NewRecorder()
@@ -1150,6 +1151,11 @@ func TestCORSPreflight(t *testing.T) {
 	if resp.Header().Get("Access-Control-Allow-Methods") == "" {
 		t.Fatal("expected allow-methods header")
 	}
+}
+
+type apiIndexResponse struct {
+	Service string            `json:"service"`
+	Links   map[string]string `json:"links"`
 }
 
 type testAssetRepo struct {
@@ -1184,7 +1190,7 @@ type testWatchlistRepo struct {
 	items []domain.WatchlistItem
 }
 
-func (r *testWatchlistRepo) GetOrCreateByName(context.Context, string) (domain.Watchlist, error) {
+func (r *testWatchlistRepo) GetOrCreateByName(context.Context, int64, string) (domain.Watchlist, error) {
 	return domain.Watchlist{ID: 1, Name: "default"}, nil
 }
 
@@ -1211,11 +1217,21 @@ func (r *testWatchlistRepo) AddItem(_ context.Context, watchlistID int64, assetI
 	return nil
 }
 
+func (r *testWatchlistRepo) RemoveItem(_ context.Context, _ int64, assetID string) error {
+	for index := range r.items {
+		if r.items[index].AssetID == assetID {
+			r.items = append(r.items[:index], r.items[index+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
 type testInstrumentService struct {
 	items map[string]domain.TinkoffInstrument
 }
 
-func (s *testInstrumentService) FindInstrument(_ context.Context, query string) ([]domain.TinkoffInstrument, error) {
+func (s *testInstrumentService) FindInstrument(_ context.Context, _ string, query string) ([]domain.TinkoffInstrument, error) {
 	out := make([]domain.TinkoffInstrument, 0, len(s.items))
 	for _, item := range s.items {
 		if strings.Contains(strings.ToLower(item.Ticker), strings.ToLower(query)) ||
@@ -1226,7 +1242,7 @@ func (s *testInstrumentService) FindInstrument(_ context.Context, query string) 
 	return out, nil
 }
 
-func (s *testInstrumentService) GetInstrumentByUID(_ context.Context, uid string) (domain.TinkoffInstrument, error) {
+func (s *testInstrumentService) GetInstrumentByUID(_ context.Context, _ string, uid string) (domain.TinkoffInstrument, error) {
 	item, ok := s.items[uid]
 	if !ok {
 		return domain.TinkoffInstrument{}, sql.ErrNoRows
@@ -1234,11 +1250,11 @@ func (s *testInstrumentService) GetInstrumentByUID(_ context.Context, uid string
 	return item, nil
 }
 
-func (s *testInstrumentService) GetCandles(ctx context.Context, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
+func (s *testInstrumentService) GetCandles(ctx context.Context, token string, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
 	return nil, nil
 }
 
-func (s *testInstrumentService) IsMarketOpen(ctx context.Context, exchange string) (bool, error) {
+func (s *testInstrumentService) IsMarketOpen(ctx context.Context, token string, exchange string) (bool, error) {
 	return true, nil
 }
 
@@ -1328,7 +1344,7 @@ func (r *testSignalRepo) Create(_ context.Context, run domain.SignalRun) (domain
 	return run, nil
 }
 
-func (r *testSignalRepo) ListLatest(_ context.Context, limit int) ([]domain.SignalRun, error) {
+func (r *testSignalRepo) ListLatest(_ context.Context, _ int64, limit int) ([]domain.SignalRun, error) {
 	if limit > len(r.items) {
 		limit = len(r.items)
 	}
@@ -1339,7 +1355,7 @@ func (r *testSignalRepo) ListLatest(_ context.Context, limit int) ([]domain.Sign
 	return out, nil
 }
 
-func (r *testSignalRepo) ListByAsset(_ context.Context, assetID string, limit int) ([]domain.SignalRun, error) {
+func (r *testSignalRepo) ListByAsset(_ context.Context, _ int64, assetID string, limit int) ([]domain.SignalRun, error) {
 	filtered := make([]domain.SignalRun, 0, len(r.items))
 	for i := len(r.items) - 1; i >= 0; i-- {
 		if r.items[i].AssetID == assetID {
@@ -1354,6 +1370,7 @@ func (r *testSignalRepo) ListByAsset(_ context.Context, assetID string, limit in
 
 func (r *testSignalRepo) ListByPolicySnapshot(
 	_ context.Context,
+	_ int64,
 	modelName string,
 	calibrationMethod string,
 	datasetVersion string,
@@ -1450,6 +1467,7 @@ func (r *testSignalOutcomeRepo) Upsert(_ context.Context, outcome domain.SignalO
 
 func (r *testSignalOutcomeRepo) ListByPolicySnapshot(
 	_ context.Context,
+	_ int64,
 	_ string,
 	_ string,
 	_ string,
@@ -1699,26 +1717,26 @@ func (r *testSignalEventRepo) Upsert(ctx context.Context, e domain.SignalEvent) 
 	return e, nil
 }
 
-func (r *testSignalEventRepo) ListLatest(ctx context.Context, limit int) ([]domain.SignalEvent, error) {
+func (r *testSignalEventRepo) ListLatest(ctx context.Context, _ int64, limit int) ([]domain.SignalEvent, error) {
 	return r.items, nil
 }
 
-func (r *testSignalEventRepo) ListByAsset(ctx context.Context, assetID string, limit int) ([]domain.SignalEvent, error) {
+func (r *testSignalEventRepo) ListByAsset(ctx context.Context, _ int64, assetID string, limit int) ([]domain.SignalEvent, error) {
 	return r.items, nil
 }
 
 type testNotificationRepo struct {
-	rules []domain.NotificationRule
+	rules  []domain.NotificationRule
 	events []domain.NotificationEvent
 }
 
-func (r *testNotificationRepo) ListRules(ctx context.Context) ([]domain.NotificationRule, error) {
+func (r *testNotificationRepo) ListRules(ctx context.Context, _ int64) ([]domain.NotificationRule, error) {
 	return r.rules, nil
 }
 func (r *testNotificationRepo) ListActiveRules(ctx context.Context) ([]domain.NotificationRule, error) {
 	return r.rules, nil
 }
-func (r *testNotificationRepo) GetRuleByID(ctx context.Context, id int64) (domain.NotificationRule, error) {
+func (r *testNotificationRepo) GetRuleByID(ctx context.Context, id int64, _ int64) (domain.NotificationRule, error) {
 	return domain.NotificationRule{}, nil
 }
 func (r *testNotificationRepo) CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
@@ -1729,7 +1747,7 @@ func (r *testNotificationRepo) CreateRule(ctx context.Context, rule domain.Notif
 func (r *testNotificationRepo) UpdateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
 	return rule, nil
 }
-func (r *testNotificationRepo) DeleteRule(ctx context.Context, id int64) error {
+func (r *testNotificationRepo) DeleteRule(ctx context.Context, id int64, _ int64) error {
 	return nil
 }
 func (r *testNotificationRepo) CreateEvent(ctx context.Context, event domain.NotificationEvent) (domain.NotificationEvent, error) {
@@ -1737,7 +1755,7 @@ func (r *testNotificationRepo) CreateEvent(ctx context.Context, event domain.Not
 	r.events = append(r.events, event)
 	return event, nil
 }
-func (r *testNotificationRepo) ListLatestEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error) {
+func (r *testNotificationRepo) ListLatestEvents(ctx context.Context, _ int64, limit int) ([]domain.NotificationEvent, error) {
 	return r.events, nil
 }
 func (r *testNotificationRepo) GetLatestEventForRule(ctx context.Context, ruleID int64) (domain.NotificationEvent, error) {

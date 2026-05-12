@@ -533,6 +533,8 @@ export type FreshnessItemDTO = {
   signal_fresh: boolean;
   stale_reason?: string;
   model_supported: boolean;
+  last_price: number;
+  price_change: number;
 };
 
 export type FreshnessSummaryDTO = {
@@ -556,6 +558,8 @@ export type FreshnessItem = {
   signalFresh: boolean;
   staleReason?: string;
   modelSupported: boolean;
+  lastPrice: number;
+  priceChange: number;
 };
 
 export type FreshnessSummary = {

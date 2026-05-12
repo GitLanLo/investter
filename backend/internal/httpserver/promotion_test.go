@@ -15,7 +15,7 @@ import (
 
 func TestPolicyPromotionEndpoints(t *testing.T) {
 	manifestPath := writeTestManifest(t)
-	
+
 	assetRepo := &testAssetRepo{
 		assets: map[string]domain.Asset{
 			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m", IsActive: true},
@@ -43,7 +43,7 @@ func TestPolicyPromotionEndpoints(t *testing.T) {
 	signalRepo := &testSignalRepo{}
 	outcomeRepo := &testSignalOutcomeRepo{}
 	eventRepo := &testSignalEventRepo{}
-	
+
 	// Pre-populate enough outcomes to satisfy promotion rules (min 20 signals)
 	for i := 0; i < 25; i++ {
 		outcomeRepo.Upsert(context.Background(), domain.SignalOutcome{
@@ -65,7 +65,7 @@ func TestPolicyPromotionEndpoints(t *testing.T) {
 		service.NewResearchArtifactsService(t.TempDir(), t.TempDir()),
 		signalRepo,
 	).WithOutcomeData(assetRepo, &testMarketDataRepo{}, outcomeRepo)
-	
+
 	models := service.NewModelRegistryService(modelRepo)
 	promotion := service.NewPolicyPromotionService(policyRepo, models, policyService, eventRepo, nil)
 
@@ -81,18 +81,18 @@ func TestPolicyPromotionEndpoints(t *testing.T) {
 	})
 
 	t.Run("promote success", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/ml/policy/validation-runs/1/promote", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/ml/policy/validation-runs/1/promote", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 
 		if resp.Code != http.StatusNoContent {
 			t.Fatalf("expected 204 NoContent, got %d body=%s", resp.Code, resp.Body.String())
 		}
-		
+
 		if modelRepo.active.ModelVersion != "v1" {
 			t.Fatalf("expected model v1 to be active in registry")
 		}
-		
+
 		run, _ := policyRepo.ListLatest(context.Background(), 1)
 		if run[0].DecisionState != domain.PolicyDecisionActive {
 			t.Fatalf("expected policy run to be active, got %s", run[0].DecisionState)
@@ -106,15 +106,15 @@ func TestPolicyPromotionEndpoints(t *testing.T) {
 			ModelVersion:  "v0",
 			DecisionState: domain.PolicyDecisionArchived,
 		})
-		
-		req := httptest.NewRequest(http.MethodPost, "/ml/policy/validation-runs/2/rollback", nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/ml/policy/validation-runs/2/rollback", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 
 		if resp.Code != http.StatusNoContent {
 			t.Fatalf("expected 204 NoContent, got %d body=%s", resp.Code, resp.Body.String())
 		}
-		
+
 		if modelRepo.active.ModelVersion != "v0" {
 			t.Fatalf("expected model v0 to be reactivated in registry")
 		}

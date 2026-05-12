@@ -20,15 +20,16 @@ import (
 )
 
 type TinkoffAdapter struct {
-	token              string
+	target             string
+	caCertFile         string
 	instrumentsBaseURL string
 	marketDataBaseURL  string
 	client             *http.Client
 }
 
-var ErrTinkoffUnavailable = errors.New("tinkoff instruments service is not configured")
+var ErrTinkoffUnavailable = errors.New("tinkoff api token is required")
 
-func NewTinkoffAdapter(token string, target string, caCertFiles ...string) *TinkoffAdapter {
+func NewTinkoffAdapter(target string, caCertFiles ...string) *TinkoffAdapter {
 	instURL := "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService"
 	mdURL := "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.MarketDataService"
 	if target == "sandbox" {
@@ -37,62 +38,48 @@ func NewTinkoffAdapter(token string, target string, caCertFiles ...string) *Tink
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	caCertFile := ""
 	if len(caCertFiles) > 0 && caCertFiles[0] != "" {
+		caCertFile = caCertFiles[0]
 		if roots, err := loadCertPool(caCertFiles[0]); err == nil {
 			tlsConfig.RootCAs = roots
 		}
 	}
 
 	return &TinkoffAdapter{
-		token:              token,
+		target:             target,
+		caCertFile:         caCertFile,
 		instrumentsBaseURL: instURL,
 		marketDataBaseURL:  mdURL,
 		client: &http.Client{
-			Timeout: 20 * time.Second,
+			Timeout: 120 * time.Second,
 			Transport: &http.Transport{
-				TLSClientConfig: tlsConfig,
+				TLSClientConfig:     tlsConfig,
+				MaxIdleConns:        100,
+				IdleConnTimeout:     120 * time.Second,
+				MaxIdleConnsPerHost: 20,
 			},
 		},
 	}
 }
 
-func loadCertPool(path string) (*x509.CertPool, error) {
-	roots, err := x509.SystemCertPool()
-	if err != nil || roots == nil {
-		roots = x509.NewCertPool()
+func (a *TinkoffAdapter) WithSandboxTarget(isSandbox bool) InstrumentService {
+	target := "prod"
+	if isSandbox {
+		target = "sandbox"
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	if a != nil && a.target == target {
+		return a
 	}
-	if !roots.AppendCertsFromPEM(raw) {
-		return nil, fmt.Errorf("no PEM certificates found in %s", path)
+	caCertFile := ""
+	if a != nil {
+		caCertFile = a.caCertFile
 	}
-	return roots, nil
+	return NewTinkoffAdapter(target, caCertFile)
 }
 
-type getInstrumentsRequest struct {
-	InstrumentStatus string `json:"instrumentStatus,omitempty"`
-}
-
-type getInstrumentsResponse struct {
-	Instruments []struct {
-		Figi                  string `json:"figi"`
-		Ticker                string `json:"ticker"`
-		ClassCode             string `json:"classCode"`
-		Isin                  string `json:"isin"`
-		Lot                   int32  `json:"lot"`
-		Currency              string `json:"currency"`
-		Name                  string `json:"name"`
-		Exchange              string `json:"exchange"`
-		InstrumentType        string `json:"instrumentType"`
-		Uid                   string `json:"uid"`
-		ApiTradeAvailableFlag bool   `json:"apiTradeAvailableFlag"`
-	} `json:"instruments"`
-}
-
-func (a *TinkoffAdapter) FindInstrument(ctx context.Context, query string) ([]domain.TinkoffInstrument, error) {
-	if a.token == "" {
+func (a *TinkoffAdapter) FindInstrument(ctx context.Context, token string, query string) ([]domain.TinkoffInstrument, error) {
+	if token == "" {
 		return nil, ErrTinkoffUnavailable
 	}
 
@@ -106,103 +93,109 @@ func (a *TinkoffAdapter) FindInstrument(ctx context.Context, query string) ([]do
 	}
 
 	endpoints := []string{"/Shares", "/Etfs", "/Currencies", "/Futures"}
-	var allInstruments []domain.TinkoffInstrument
-
 	qLower := strings.ToLower(query)
 
+	type result struct {
+		instruments []domain.TinkoffInstrument
+		err         error
+	}
+	resChan := make(chan result, len(endpoints))
+
 	for _, ep := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.instrumentsBaseURL+ep, bytes.NewReader(b))
-		if err != nil {
-			return nil, err
-		}
-
-		req.Header.Set("Authorization", "Bearer "+a.token)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := a.client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			return nil, fmt.Errorf("tinkoff api error on %s: %d %s", ep, resp.StatusCode, string(body))
-		}
-
-		var payload getInstrumentsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			resp.Body.Close()
-			return nil, err
-		}
-		resp.Body.Close()
-
-		for _, inst := range payload.Instruments {
-			if strings.Contains(strings.ToLower(inst.Name), qLower) ||
-				strings.Contains(strings.ToLower(inst.Ticker), qLower) ||
-				strings.Contains(strings.ToLower(inst.Uid), qLower) {
-
-				// Provide a default instrumentType if missing (Shares endpoint might omit it)
-				iType := inst.InstrumentType
-				if iType == "" {
-					if ep == "/Shares" {
-						iType = "share"
-					} else if ep == "/Etfs" {
-						iType = "etf"
-					} else if ep == "/Currencies" {
-						iType = "currency"
-					} else if ep == "/Futures" {
-						iType = "future"
-					}
-				}
-
-				allInstruments = append(allInstruments, domain.TinkoffInstrument{
-					UID:               inst.Uid,
-					Figi:              inst.Figi,
-					Ticker:            inst.Ticker,
-					ClassCode:         inst.ClassCode,
-					Isin:              inst.Isin,
-					Lot:               inst.Lot,
-					Currency:          inst.Currency,
-					Name:              inst.Name,
-					Exchange:          inst.Exchange,
-					InstrumentType:    iType,
-					APITradeAvailable: inst.ApiTradeAvailableFlag,
-				})
+		go func(endpoint string) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.instrumentsBaseURL+endpoint, bytes.NewReader(b))
+			if err != nil {
+				resChan <- result{err: err}
+				return
 			}
+
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := a.client.Do(req)
+			if err != nil {
+				resChan <- result{err: err}
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				resChan <- result{err: fmt.Errorf("tinkoff api error on %s: %d %s", endpoint, resp.StatusCode, string(body))}
+				return
+			}
+
+			var payload getInstrumentsResponse
+			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+				resChan <- result{err: err}
+				return
+			}
+
+			var matched []domain.TinkoffInstrument
+			for _, inst := range payload.Instruments {
+				if strings.Contains(strings.ToLower(inst.Name), qLower) ||
+					strings.Contains(strings.ToLower(inst.Ticker), qLower) ||
+					strings.Contains(strings.ToLower(inst.Uid), qLower) {
+
+					iType := inst.InstrumentType
+					if iType == "" {
+						switch endpoint {
+						case "/Shares":
+							iType = "share"
+						case "/Etfs":
+							iType = "etf"
+						case "/Currencies":
+							iType = "currency"
+						case "/Futures":
+							iType = "future"
+						}
+					}
+
+					matched = append(matched, domain.TinkoffInstrument{
+						UID:               inst.Uid,
+						Figi:              inst.Figi,
+						Ticker:            inst.Ticker,
+						ClassCode:         inst.ClassCode,
+						Isin:              inst.Isin,
+						Lot:               inst.Lot,
+						Currency:          inst.Currency,
+						Name:              inst.Name,
+						Exchange:          inst.Exchange,
+						InstrumentType:    iType,
+						APITradeAvailable: inst.ApiTradeAvailableFlag,
+					})
+				}
+			}
+			resChan <- result{instruments: matched}
+		}(ep)
+	}
+
+	var allInstruments []domain.TinkoffInstrument
+	var firstErr error
+	for i := 0; i < len(endpoints); i++ {
+		res := <-resChan
+		if res.err != nil {
+			if firstErr == nil {
+				firstErr = res.err
+			}
+			continue
 		}
+		allInstruments = append(allInstruments, res.instruments...)
+	}
+
+	if len(allInstruments) == 0 && firstErr != nil {
+		return nil, firstErr
 	}
 
 	return allInstruments, nil
 }
 
-type getInstrumentByRequest struct {
-	IdType    string `json:"idType"`
-	ClassCode string `json:"classCode,omitempty"`
-	Id        string `json:"id"`
-}
-
-type getInstrumentByResponse struct {
-	Instrument struct {
-		Figi                  string `json:"figi"`
-		Ticker                string `json:"ticker"`
-		ClassCode             string `json:"classCode"`
-		Isin                  string `json:"isin"`
-		Lot                   int32  `json:"lot"`
-		Currency              string `json:"currency"`
-		Name                  string `json:"name"`
-		Exchange              string `json:"exchange"`
-		InstrumentType        string `json:"instrumentType"`
-		Uid                   string `json:"uid"`
-		ApiTradeAvailableFlag bool   `json:"apiTradeAvailableFlag"`
-		First1MinCandleDate   string `json:"first1MinCandleDate"`
-		First1DayCandleDate   string `json:"first1DayCandleDate"`
-	} `json:"instrument"`
-}
-
-func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, uid string) (domain.TinkoffInstrument, error) {
-	if a.token == "" {
+func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, token string, uid string) (domain.TinkoffInstrument, error) {
+	if token == "" {
 		return domain.TinkoffInstrument{}, ErrTinkoffUnavailable
+	}
+	if uid == "" {
+		return domain.TinkoffInstrument{}, errors.New("instrument uid is required")
 	}
 
 	reqBody := getInstrumentByRequest{
@@ -220,7 +213,7 @@ func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, uid string) (do
 		return domain.TinkoffInstrument{}, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+a.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
@@ -269,6 +262,233 @@ func (a *TinkoffAdapter) GetInstrumentByUID(ctx context.Context, uid string) (do
 	}
 
 	return res, nil
+}
+
+func (a *TinkoffAdapter) GetCandles(ctx context.Context, token string, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
+	if token == "" {
+		return nil, ErrTinkoffUnavailable
+	}
+	if uid == "" {
+		return nil, errors.New("instrument uid is required")
+	}
+
+	interval := mapTimeframeToTinkoff(timeframe)
+	if interval == "" {
+		return nil, fmt.Errorf("unsupported timeframe for tinkoff: %s", timeframe)
+	}
+	if !from.Before(to) {
+		return nil, nil
+	}
+
+	maxWindow := maxTinkoffCandleWindow(timeframe)
+	out := make([]domain.Candle, 0)
+	for chunkFrom := from.UTC(); chunkFrom.Before(to.UTC()); {
+		chunkTo := chunkFrom.Add(maxWindow)
+		if chunkTo.After(to.UTC()) {
+			chunkTo = to.UTC()
+		}
+
+		items, err := a.getCandlesChunk(ctx, token, uid, timeframe, interval, chunkFrom, chunkTo)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+		chunkFrom = chunkTo
+	}
+
+	return out, nil
+}
+
+func (a *TinkoffAdapter) getCandlesChunk(
+	ctx context.Context,
+	token string,
+	uid string,
+	timeframe string,
+	interval string,
+	from time.Time,
+	to time.Time,
+) ([]domain.Candle, error) {
+	reqBody := getCandlesRequest{
+		InstrumentId: uid,
+		From:         from.UTC().Format(time.RFC3339),
+		To:           to.UTC().Format(time.RFC3339),
+		Interval:     interval,
+	}
+
+	b, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.marketDataBaseURL+"/GetCandles", bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("tinkoff api error (GetCandles): %d %s", resp.StatusCode, string(body))
+	}
+
+	var payload getCandlesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.Candle, 0, len(payload.Candles))
+	ingestedAt := time.Now().UTC()
+
+	for _, c := range payload.Candles {
+		ts, err := time.Parse(time.RFC3339, c.Time)
+		if err != nil {
+			continue
+		}
+
+		vol, _ := parseJSONInt64(c.Volume)
+
+		out = append(out, domain.Candle{
+			Timestamp:  ts.UTC(),
+			Open:       c.Open.ToFloat(),
+			High:       c.High.ToFloat(),
+			Low:        c.Low.ToFloat(),
+			Close:      c.Close.ToFloat(),
+			Volume:     vol,
+			Timeframe:  timeframe,
+			Source:     "tinkoff",
+			IngestedAt: ingestedAt,
+		})
+	}
+
+	return out, nil
+}
+
+func (a *TinkoffAdapter) IsMarketOpen(ctx context.Context, token string, exchange string) (bool, error) {
+	if token == "" {
+		return false, ErrTinkoffUnavailable
+	}
+
+	now := time.Now().UTC()
+	reqBody := getTradingSchedulesRequest{
+		Exchange: exchange,
+		From:     now.Format(time.RFC3339),
+		To:       now.Format(time.RFC3339),
+	}
+
+	b, err := json.Marshal(reqBody)
+	if err != nil {
+		return false, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.instrumentsBaseURL+"/GetTradingSchedules", bytes.NewReader(b))
+	if err != nil {
+		return false, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return true, nil
+	}
+
+	var payload getTradingSchedulesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return true, nil
+	}
+
+	for _, ex := range payload.Exchanges {
+		if ex.Exchange == exchange {
+			for _, day := range ex.Days {
+				if !day.IsTradingDay {
+					return false, nil
+				}
+
+				start, _ := time.Parse(time.RFC3339, day.StartTime)
+				end, _ := time.Parse(time.RFC3339, day.EndTime)
+
+				if now.Before(start) || now.After(end) {
+					return false, nil
+				}
+				return true, nil
+			}
+		}
+	}
+
+	return true, nil
+}
+
+func loadCertPool(path string) (*x509.CertPool, error) {
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !roots.AppendCertsFromPEM(raw) {
+		return nil, fmt.Errorf("no PEM certificates found in %s", path)
+	}
+	return roots, nil
+}
+
+type getInstrumentsRequest struct {
+	InstrumentStatus string `json:"instrumentStatus,omitempty"`
+}
+
+type getInstrumentsResponse struct {
+	Instruments []struct {
+		Figi                  string `json:"figi"`
+		Ticker                string `json:"ticker"`
+		ClassCode             string `json:"classCode"`
+		Isin                  string `json:"isin"`
+		Lot                   int32  `json:"lot"`
+		Currency              string `json:"currency"`
+		Name                  string `json:"name"`
+		Exchange              string `json:"exchange"`
+		InstrumentType        string `json:"instrumentType"`
+		Uid                   string `json:"uid"`
+		ApiTradeAvailableFlag bool   `json:"apiTradeAvailableFlag"`
+	} `json:"instruments"`
+}
+
+type getInstrumentByRequest struct {
+	IdType    string `json:"idType"`
+	ClassCode string `json:"classCode,omitempty"`
+	Id        string `json:"id"`
+}
+
+type getInstrumentByResponse struct {
+	Instrument struct {
+		Figi                  string `json:"figi"`
+		Ticker                string `json:"ticker"`
+		ClassCode             string `json:"classCode"`
+		Isin                  string `json:"isin"`
+		Lot                   int32  `json:"lot"`
+		Currency              string `json:"currency"`
+		Name                  string `json:"name"`
+		Exchange              string `json:"exchange"`
+		InstrumentType        string `json:"instrumentType"`
+		Uid                   string `json:"uid"`
+		ApiTradeAvailableFlag bool   `json:"apiTradeAvailableFlag"`
+		First1MinCandleDate   string `json:"first1MinCandleDate"`
+		First1DayCandleDate   string `json:"first1DayCandleDate"`
+	} `json:"instrument"`
 }
 
 type getCandlesRequest struct {
@@ -330,114 +550,10 @@ type getCandlesResponse struct {
 		High       tinkoffQuotation `json:"high"`
 		Low        tinkoffQuotation `json:"low"`
 		Close      tinkoffQuotation `json:"close"`
-		Volume     string           `json:"volume"`
+		Volume     json.RawMessage  `json:"volume"`
 		Time       string           `json:"time"`
 		IsComplete bool             `json:"isComplete"`
 	} `json:"candles"`
-}
-
-func (a *TinkoffAdapter) GetCandles(ctx context.Context, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
-	if a.token == "" {
-		return nil, ErrTinkoffUnavailable
-	}
-
-	interval := mapTimeframeToTinkoff(timeframe)
-	if interval == "" {
-		return nil, fmt.Errorf("unsupported timeframe for tinkoff: %s", timeframe)
-	}
-	if !from.Before(to) {
-		return nil, nil
-	}
-
-	maxWindow := maxTinkoffCandleWindow(timeframe)
-	out := make([]domain.Candle, 0)
-	for chunkFrom := from.UTC(); chunkFrom.Before(to.UTC()); {
-		chunkTo := chunkFrom.Add(maxWindow)
-		if chunkTo.After(to.UTC()) {
-			chunkTo = to.UTC()
-		}
-
-		items, err := a.getCandlesChunk(ctx, uid, timeframe, interval, chunkFrom, chunkTo)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, items...)
-		chunkFrom = chunkTo
-	}
-
-	return out, nil
-}
-
-func (a *TinkoffAdapter) getCandlesChunk(
-	ctx context.Context,
-	uid string,
-	timeframe string,
-	interval string,
-	from time.Time,
-	to time.Time,
-) ([]domain.Candle, error) {
-	reqBody := getCandlesRequest{
-		InstrumentId: uid,
-		From:         from.UTC().Format(time.RFC3339),
-		To:           to.UTC().Format(time.RFC3339),
-		Interval:     interval,
-	}
-
-	b, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.marketDataBaseURL+"/GetCandles", bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+a.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("tinkoff api error (GetCandles): %d %s", resp.StatusCode, string(body))
-	}
-
-	var payload getCandlesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	out := make([]domain.Candle, 0, len(payload.Candles))
-	ingestedAt := time.Now().UTC()
-
-	for _, c := range payload.Candles {
-		ts, err := time.Parse(time.RFC3339, c.Time)
-		if err != nil {
-			continue
-		}
-
-		var vol int64
-		fmt.Sscanf(c.Volume, "%d", &vol)
-
-		out = append(out, domain.Candle{
-			Timestamp:  ts.UTC(),
-			Open:       c.Open.ToFloat(),
-			High:       c.High.ToFloat(),
-			Low:        c.Low.ToFloat(),
-			Close:      c.Close.ToFloat(),
-			Volume:     vol,
-			Timeframe:  timeframe,
-			Source:     "tinkoff",
-			IngestedAt: ingestedAt,
-		})
-	}
-
-	return out, nil
 }
 
 type getTradingSchedulesRequest struct {
@@ -458,67 +574,6 @@ type getTradingSchedulesResponse struct {
 			ClosingAuctionEndTime   string `json:"closingAuctionEndTime"`
 		} `json:"days"`
 	} `json:"exchanges"`
-}
-
-func (a *TinkoffAdapter) IsMarketOpen(ctx context.Context, exchange string) (bool, error) {
-	if a.token == "" {
-		return false, ErrTinkoffUnavailable
-	}
-
-	now := time.Now().UTC()
-	reqBody := getTradingSchedulesRequest{
-		Exchange: exchange,
-		From:     now.Format(time.RFC3339),
-		To:       now.Format(time.RFC3339),
-	}
-
-	b, err := json.Marshal(reqBody)
-	if err != nil {
-		return false, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.instrumentsBaseURL+"/GetTradingSchedules", bytes.NewReader(b))
-	if err != nil {
-		return false, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+a.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return true, nil // Default to open if API fails to avoid blocking
-	}
-
-	var payload getTradingSchedulesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return true, nil
-	}
-
-	for _, ex := range payload.Exchanges {
-		if ex.Exchange == exchange {
-			for _, day := range ex.Days {
-				if !day.IsTradingDay {
-					return false, nil
-				}
-
-				start, _ := time.Parse(time.RFC3339, day.StartTime)
-				end, _ := time.Parse(time.RFC3339, day.EndTime)
-
-				if now.Before(start) || now.After(end) {
-					return false, nil
-				}
-				return true, nil
-			}
-		}
-	}
-
-	return true, nil
 }
 
 func mapTimeframeToTinkoff(tf string) string {

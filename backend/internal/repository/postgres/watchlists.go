@@ -16,13 +16,13 @@ func NewWatchlistRepository(db *sql.DB) *WatchlistRepository {
 	return &WatchlistRepository{db: db}
 }
 
-func (r *WatchlistRepository) GetOrCreateByName(ctx context.Context, name string) (domain.Watchlist, error) {
+func (r *WatchlistRepository) GetOrCreateByName(ctx context.Context, userID int64, name string) (domain.Watchlist, error) {
 	var watchlist domain.Watchlist
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, created_at, updated_at
+		SELECT id, name, user_id, created_at, updated_at
 		FROM watchlists
-		WHERE name = $1
-	`, name).Scan(&watchlist.ID, &watchlist.Name, &watchlist.CreatedAt, &watchlist.UpdatedAt)
+		WHERE name = $1 AND user_id = $2
+	`, name, userID).Scan(&watchlist.ID, &watchlist.Name, &watchlist.UserID, &watchlist.CreatedAt, &watchlist.UpdatedAt)
 	if err == nil {
 		return watchlist, nil
 	}
@@ -31,10 +31,10 @@ func (r *WatchlistRepository) GetOrCreateByName(ctx context.Context, name string
 	}
 
 	err = r.db.QueryRowContext(ctx, `
-		INSERT INTO watchlists (name)
-		VALUES ($1)
-		RETURNING id, name, created_at, updated_at
-	`, name).Scan(&watchlist.ID, &watchlist.Name, &watchlist.CreatedAt, &watchlist.UpdatedAt)
+		INSERT INTO watchlists (name, user_id)
+		VALUES ($1, $2)
+		RETURNING id, name, user_id, created_at, updated_at
+	`, name, userID).Scan(&watchlist.ID, &watchlist.Name, &watchlist.UserID, &watchlist.CreatedAt, &watchlist.UpdatedAt)
 	if err != nil {
 		return domain.Watchlist{}, err
 	}
@@ -80,5 +80,13 @@ func (r *WatchlistRepository) AddItem(ctx context.Context, watchlistID int64, as
 		SET position = EXCLUDED.position
 	`, watchlistID, assetID, position)
 
+	return err
+}
+
+func (r *WatchlistRepository) RemoveItem(ctx context.Context, watchlistID int64, assetID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM watchlist_items
+		WHERE watchlist_id = $1 AND asset_id = $2
+	`, watchlistID, assetID)
 	return err
 }

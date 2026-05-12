@@ -27,6 +27,8 @@ type Config struct {
 	TinkoffInvestToken         string
 	TinkoffInvestTarget        string
 	TinkoffCACertFile          string
+	JWTSecret                  string
+	EncryptionKey              string
 
 	WatchlistRefreshSchedulerEnabled bool
 	WatchlistRefreshInterval         time.Duration
@@ -55,14 +57,16 @@ func Load() Config {
 		OutcomeSchedulerLimit:      getEnvInt("OUTCOME_SCHEDULER_LIMIT", 1000),
 		OutcomeSchedulerRunOnStart: getEnvBool("OUTCOME_SCHEDULER_RUN_ON_START", false),
 		TinkoffInvestToken:         getEnv("TINKOFF_INVEST_TOKEN", ""),
-		TinkoffInvestTarget:        getEnv("TINKOFF_INVEST_TARGET", "sandbox"),
+		TinkoffInvestTarget:        getEnv("TINKOFF_INVEST_TARGET", "prod"),
 		TinkoffCACertFile:          getEnv("TINKOFF_CA_CERT_FILE", ""),
+		JWTSecret:                  getEnv("JWT_SECRET", "super-secret-key"),
+		EncryptionKey:              getEnv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef"), // 32 bytes for AES-256
 
-		WatchlistRefreshSchedulerEnabled: getEnvBool("WATCHLIST_REFRESH_SCHEDULER_ENABLED", false),
-		WatchlistRefreshInterval:         getEnvDuration("WATCHLIST_REFRESH_INTERVAL", 30*time.Minute),
+		WatchlistRefreshSchedulerEnabled: getEnvBool("WATCHLIST_REFRESH_SCHEDULER_ENABLED", true),
+		WatchlistRefreshInterval:         getEnvDuration("WATCHLIST_REFRESH_INTERVAL", 1*time.Minute),
 		WatchlistRefreshLimit:            getEnvInt("WATCHLIST_REFRESH_LIMIT", 50),
-		WatchlistSignalSchedulerEnabled:  getEnvBool("WATCHLIST_SIGNAL_SCHEDULER_ENABLED", false),
-		WatchlistSignalInterval:          getEnvDuration("WATCHLIST_SIGNAL_INTERVAL", 30*time.Minute),
+		WatchlistSignalSchedulerEnabled:  getEnvBool("WATCHLIST_SIGNAL_SCHEDULER_ENABLED", true),
+		WatchlistSignalInterval:          getEnvDuration("WATCHLIST_SIGNAL_INTERVAL", 1*time.Minute),
 	}
 }
 

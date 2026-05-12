@@ -3,15 +3,41 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 	"time"
 
 	"invest/backend/internal/domain"
+	"invest/backend/internal/repository"
 )
 
+func newTestWatchlistRefreshService(
+	watchlistRepo repository.WatchlistRepository,
+	assetRepo repository.AssetRepository,
+	marketData repository.MarketDataRepository,
+	jobRepo repository.JobRunRepository,
+	signalRepo repository.SignalRunRepository,
+	analysis *AnalysisService,
+	instruments InstrumentService,
+	tinkoffCredentials *TinkoffCredentialService,
+) *WatchlistRefreshService {
+	return NewWatchlistRefreshService(
+		watchlistRepo,
+		assetRepo,
+		marketData,
+		jobRepo,
+		signalRepo,
+		analysis,
+		instruments,
+		tinkoffCredentials,
+		"test-token",
+		log.Default(),
+	)
+}
+
 func TestGetFreshness_Empty(t *testing.T) {
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: nil},
 		&MockAssetRepo{Assets: map[string]domain.Asset{}},
 		&MockMarketDataRepo{Candles: map[string][]domain.Candle{}},
@@ -34,7 +60,7 @@ func TestGetFreshness_WithItems(t *testing.T) {
 	freshCandle := now.Add(-30 * time.Minute)
 	staleCandle := now.Add(-3 * time.Hour)
 
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{
 			{AssetID: "A1"},
 			{AssetID: "A2"},
@@ -85,7 +111,7 @@ func TestGetFreshness_WithItems(t *testing.T) {
 
 func TestRunWatchlistRefresh_CreatesJob(t *testing.T) {
 	jobRepo := &MockJobRunRepo{}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{
 			{AssetID: "SBER"},
 		}},
@@ -112,7 +138,7 @@ func TestRunWatchlistRefresh_CreatesJob(t *testing.T) {
 
 func TestRunWatchlistSignalRefresh_CreatesJob(t *testing.T) {
 	jobRepo := &MockJobRunRepo{}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{
 			{AssetID: "SBER"},
 		}},
@@ -138,7 +164,7 @@ func TestRunWatchlistSignalRefresh_CreatesJob(t *testing.T) {
 }
 
 func TestRunWatchlistRefresh_NoJobRepo(t *testing.T) {
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: nil},
 		&MockAssetRepo{Assets: map[string]domain.Asset{}},
 		&MockMarketDataRepo{Candles: map[string][]domain.Candle{}},
@@ -158,22 +184,22 @@ type mockInstrumentService struct {
 	instruments []domain.TinkoffInstrument
 }
 
-func (m *mockInstrumentService) FindInstrument(ctx context.Context, query string) ([]domain.TinkoffInstrument, error) {
+func (m *mockInstrumentService) FindInstrument(ctx context.Context, token string, query string) ([]domain.TinkoffInstrument, error) {
 	return m.instruments, nil
 }
-func (m *mockInstrumentService) GetInstrumentByUID(ctx context.Context, uid string) (domain.TinkoffInstrument, error) {
+func (m *mockInstrumentService) GetInstrumentByUID(ctx context.Context, token string, uid string) (domain.TinkoffInstrument, error) {
 	if uid == "FAIL" {
 		return domain.TinkoffInstrument{}, fmt.Errorf("api error")
 	}
 	return domain.TinkoffInstrument{UID: uid, Ticker: "T1", Name: "Asset1"}, nil
 }
-func (m *mockInstrumentService) GetCandles(ctx context.Context, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
+func (m *mockInstrumentService) GetCandles(ctx context.Context, token string, uid string, timeframe string, from time.Time, to time.Time) ([]domain.Candle, error) {
 	if uid == "FAIL" {
 		return nil, fmt.Errorf("api error")
 	}
 	return []domain.Candle{{Timestamp: time.Now().UTC()}}, nil
 }
-func (m *mockInstrumentService) IsMarketOpen(ctx context.Context, exchange string) (bool, error) {
+func (m *mockInstrumentService) IsMarketOpen(ctx context.Context, token string, exchange string) (bool, error) {
 	return m.open, nil
 }
 
@@ -181,7 +207,7 @@ func TestGetFreshness_MarketClosed(t *testing.T) {
 	now := time.Now().UTC()
 	staleCandle := now.Add(-3 * time.Hour)
 
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{{AssetID: "A1"}}},
 		&MockAssetRepo{Assets: map[string]domain.Asset{
 			"A1": {ID: "A1", Ticker: "T1", Exchange: "MOEX", ModelSupported: true},
@@ -210,7 +236,7 @@ func TestGetFreshness_MarketClosed(t *testing.T) {
 
 func TestRunWatchlistRefresh_PartialFailure(t *testing.T) {
 	jobRepo := &MockJobRunRepo{}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{
 			{AssetID: "OK"},
 			{AssetID: "FAIL"},
@@ -239,7 +265,7 @@ func TestRunWatchlistRefresh_PartialFailure(t *testing.T) {
 func TestRunWatchlistRefresh_ChecksFactorFreshness(t *testing.T) {
 	now := time.Now().UTC()
 	jobRepo := &MockJobRunRepo{}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{{AssetID: "SBER"}}},
 		&MockAssetRepo{Assets: map[string]domain.Asset{
 			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m"},
@@ -276,7 +302,7 @@ func TestRunWatchlistRefresh_RefreshesConfiguredFactors(t *testing.T) {
 	now := time.Now().UTC()
 	jobRepo := &MockJobRunRepo{}
 	marketRepo := &MockMarketDataRepo{}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{{AssetID: "SBER"}}},
 		&MockAssetRepo{Assets: map[string]domain.Asset{
 			"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m"},
@@ -320,7 +346,7 @@ func TestRunWatchlistRefresh_ResolvesMissingInstrumentUID(t *testing.T) {
 	assetRepo := &MockAssetRepo{Assets: map[string]domain.Asset{
 		"SBER": {ID: "SBER", Ticker: "SBER", Timeframe: "5m", ModelSupported: true},
 	}}
-	svc := NewWatchlistRefreshService(
+	svc := newTestWatchlistRefreshService(
 		&MockWatchlistRepo{Items: []domain.WatchlistItem{{AssetID: "SBER"}}},
 		assetRepo,
 		marketRepo,

@@ -17,3 +17,13 @@ type TinkoffInstrument struct {
 	First1MinCandleDate *time.Time
 	First1DayCandleDate *time.Time
 }
+
+type UserTinkoffCredential struct {
+	UserID         int64
+	TokenEncrypted []byte
+	TokenNonce     []byte
+	TokenHint      string
+	IsSandbox      bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}

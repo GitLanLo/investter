@@ -224,6 +224,7 @@ func (s *PolicyValidationService) LoadOutcomeSummaryByID(ctx context.Context, ru
 
 	signals, err := s.signals.ListByPolicySnapshot(
 		ctx,
+		0,
 		selected.ModelName,
 		selected.CalibrationMethod,
 		selected.DatasetVersion,
@@ -445,6 +446,7 @@ func (s *PolicyValidationService) loadSelectedPolicySignals(
 
 	signals, err := s.signals.ListByPolicySnapshot(
 		ctx,
+		0,
 		selected.ModelName,
 		selected.CalibrationMethod,
 		selected.DatasetVersion,
@@ -542,6 +544,7 @@ func (s *PolicyValidationService) loadPersistedOutcomeIndex(
 	}
 	items, err := s.outcomes.ListByPolicySnapshot(
 		ctx,
+		0,
 		selected.ModelName,
 		selected.CalibrationMethod,
 		selected.DatasetVersion,

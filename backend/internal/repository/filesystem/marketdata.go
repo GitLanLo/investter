@@ -104,6 +104,7 @@ func (r *MarketDataRepository) ListCandles(
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Timestamp.Before(items[j].Timestamp)
 	})
+	items = dedupeCandlesByTimestamp(items)
 
 	if limit > 0 && len(items) > limit {
 		items = items[len(items)-limit:]
@@ -191,7 +192,7 @@ func (r *MarketDataRepository) AppendCandles(
 
 	// Group candles by date
 	byDate := make(map[string][]candleRow)
-	for _, c := range candles {
+	for _, c := range dedupeCandlesByTimestamp(candles) {
 		rowTicker := c.Ticker
 		if rowTicker == "" {
 			rowTicker = ticker
@@ -238,6 +239,31 @@ func (r *MarketDataRepository) AppendCandles(
 	}
 
 	return nil
+}
+
+func dedupeCandlesByTimestamp(candles []domain.Candle) []domain.Candle {
+	if len(candles) < 2 {
+		return candles
+	}
+
+	byTimestamp := make(map[int64]domain.Candle, len(candles))
+	for _, candle := range candles {
+		key := candle.Timestamp.UTC().UnixNano()
+		existing, ok := byTimestamp[key]
+		if !ok || candle.IngestedAt.After(existing.IngestedAt) || candle.IngestedAt.Equal(existing.IngestedAt) {
+			candle.Timestamp = candle.Timestamp.UTC()
+			byTimestamp[key] = candle
+		}
+	}
+
+	out := make([]domain.Candle, 0, len(byTimestamp))
+	for _, candle := range byTimestamp {
+		out = append(out, candle)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Timestamp.Before(out[j].Timestamp)
+	})
+	return out
 }
 
 func (r *MarketDataRepository) AppendFactors(

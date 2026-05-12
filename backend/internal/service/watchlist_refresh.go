@@ -21,15 +21,17 @@ const (
 // WatchlistRefreshService handles the live loop for refreshing watchlist instrument data
 // and generating signals for model-supported instruments.
 type WatchlistRefreshService struct {
-	watchlistRepo repository.WatchlistRepository
-	assetRepo     repository.AssetRepository
-	marketData    repository.MarketDataRepository
-	jobRepo       repository.JobRunRepository
-	signalRepo    repository.SignalRunRepository
-	analysis      *AnalysisService
-	instruments   InstrumentService
-	logger        *log.Logger
-	factorSpecs   []FactorRefreshSpec
+	watchlistRepo      repository.WatchlistRepository
+	assetRepo          repository.AssetRepository
+	marketData         repository.MarketDataRepository
+	jobRepo            repository.JobRunRepository
+	signalRepo         repository.SignalRunRepository
+	analysis           *AnalysisService
+	instruments        InstrumentService
+	tinkoffCredentials *TinkoffCredentialService
+	systemToken        string
+	logger             *log.Logger
+	factorSpecs        []FactorRefreshSpec
 }
 
 func NewWatchlistRefreshService(
@@ -40,17 +42,21 @@ func NewWatchlistRefreshService(
 	signalRepo repository.SignalRunRepository,
 	analysis *AnalysisService,
 	instruments InstrumentService,
+	tinkoffCredentials *TinkoffCredentialService,
+	systemToken string,
 	logger *log.Logger,
 ) *WatchlistRefreshService {
 	return &WatchlistRefreshService{
-		watchlistRepo: watchlistRepo,
-		assetRepo:     assetRepo,
-		marketData:    marketData,
-		jobRepo:       jobRepo,
-		signalRepo:    signalRepo,
-		analysis:      analysis,
-		instruments:   instruments,
-		logger:        logger,
+		watchlistRepo:      watchlistRepo,
+		assetRepo:          assetRepo,
+		marketData:         marketData,
+		jobRepo:            jobRepo,
+		signalRepo:         signalRepo,
+		analysis:           analysis,
+		instruments:        instruments,
+		tinkoffCredentials: tinkoffCredentials,
+		systemToken:        systemToken,
+		logger:             logger,
 	}
 }
 
@@ -116,6 +122,8 @@ type FreshnessItem struct {
 	SignalFresh    bool       `json:"signal_fresh"`
 	StaleReason    string     `json:"stale_reason,omitempty"`
 	ModelSupported bool       `json:"model_supported"`
+	LastPrice      float64    `json:"last_price"`
+	PriceChange    float64    `json:"price_change"`
 }
 
 // FreshnessSummary is the response for the freshness endpoint.
@@ -136,9 +144,116 @@ const dataFreshnessThreshold = 2 * time.Hour
 // signalFreshnessThreshold defines the maximum age of a signal before it's considered stale.
 const signalFreshnessThreshold = 4 * time.Hour
 
-// GetFreshness returns the freshness summary for all watchlist instruments.
 func (s *WatchlistRefreshService) GetFreshness(ctx context.Context) (FreshnessSummary, error) {
-	watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, "default")
+	assets, err := s.assetRepo.List(ctx)
+	if err != nil {
+		return FreshnessSummary{}, fmt.Errorf("assets list failed: %w", err)
+	}
+
+	now := time.Now().UTC()
+	lookbackStart := now.Add(-30 * 24 * time.Hour)
+	summary := FreshnessSummary{
+		GeneratedAt: now,
+		TotalItems:  len(assets),
+		Items:       make([]FreshnessItem, len(assets)),
+	}
+
+	type result struct {
+		index int
+		item  FreshnessItem
+	}
+	resChan := make(chan result, len(assets))
+
+	for i, asset := range assets {
+		go func(idx int, a domain.Asset) {
+			fi := FreshnessItem{
+				AssetID:        a.ID,
+				Ticker:         a.Ticker,
+				Name:           a.Name,
+				ModelSupported: a.ModelSupported,
+			}
+
+			ticker := strings.TrimSpace(a.Ticker)
+			if ticker == "" {
+				ticker = strings.TrimSpace(a.ID)
+			}
+			timeframe := strings.TrimSpace(a.Timeframe)
+			if timeframe == "" {
+				timeframe = "5m"
+			}
+
+			timeframesToTry := []string{timeframe, "1h", "1d", "15m", "1m"}
+			var candles []domain.Candle
+			var usedTimeframe string
+
+			for _, tf := range timeframesToTry {
+				if tf == "" {
+					continue
+				}
+				// Use a shorter timeout for individual candle lookups to prevent total request hang
+				lookupCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				c, _ := s.marketData.ListCandles(lookupCtx, ticker, tf, lookbackStart, time.Time{}, 2)
+				cancel()
+				if len(c) > 0 {
+					candles = c
+					usedTimeframe = tf
+					break
+				}
+			}
+
+			if len(candles) > 0 {
+				latest := candles[len(candles)-1]
+				fi.LastCandleAt = &latest.Timestamp
+				fi.LastPrice = latest.Close
+
+				// Calculate 24h change using the same timeframe that had data
+				dayAgo := latest.Timestamp.Add(-24 * time.Hour)
+				// Small timeout for change calculation too
+				changeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				prevCands, _ := s.marketData.ListCandles(changeCtx, ticker, usedTimeframe, dayAgo.Add(-12*time.Hour), dayAgo.Add(12*time.Hour), 100)
+				cancel()
+				if len(prevCands) > 0 {
+					best := prevCands[0]
+					bestDiff := best.Timestamp.Sub(dayAgo).Abs()
+					for _, c := range prevCands {
+						diff := c.Timestamp.Sub(dayAgo).Abs()
+						if diff < bestDiff {
+							best = c
+							bestDiff = diff
+						}
+					}
+					fi.PriceChange = latest.Close - best.Close
+				} else if len(candles) > 1 {
+					fi.PriceChange = latest.Close - candles[0].Close
+				}
+
+				if now.Sub(latest.Timestamp) < dataFreshnessThreshold {
+					fi.DataFresh = true
+				} else {
+					fi.StaleReason = "candle data older than " + dataFreshnessThreshold.String()
+				}
+			} else {
+				fi.StaleReason = "no candle data available in any timeframe"
+			}
+			resChan <- result{idx, fi}
+		}(i, asset)
+	}
+
+	for i := 0; i < len(assets); i++ {
+		res := <-resChan
+		summary.Items[res.index] = res.item
+		if res.item.DataFresh {
+			summary.FreshData++
+		} else {
+			summary.StaleData++
+		}
+	}
+
+	return summary, nil
+}
+
+func (s *WatchlistRefreshService) GetFreshnessForUser(ctx context.Context, userID int64) (FreshnessSummary, error) {
+	watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, userID, "default")
 	if err != nil {
 		return FreshnessSummary{}, fmt.Errorf("watchlist init failed: %w", err)
 	}
@@ -148,107 +263,39 @@ func (s *WatchlistRefreshService) GetFreshness(ctx context.Context) (FreshnessSu
 		return FreshnessSummary{}, fmt.Errorf("watchlist items failed: %w", err)
 	}
 
-	now := time.Now().UTC()
-	summary := FreshnessSummary{
-		GeneratedAt: now,
-		TotalItems:  len(wlItems),
-		Items:       make([]FreshnessItem, 0, len(wlItems)),
+	summary, err := s.GetFreshness(ctx)
+	if err != nil {
+		return summary, err
 	}
 
-	for _, wlItem := range wlItems {
-		asset, err := s.assetRepo.GetByID(ctx, wlItem.AssetID)
-		if err != nil {
-			summary.Items = append(summary.Items, FreshnessItem{
-				AssetID:     wlItem.AssetID,
-				DataFresh:   false,
-				SignalFresh: false,
-				StaleReason: "asset not found",
-			})
-			summary.StaleData++
-			summary.StaleSignals++
-			continue
-		}
+	now := time.Now().UTC()
+	wlAssetIDs := make(map[string]struct{})
+	for _, item := range wlItems {
+		wlAssetIDs[item.AssetID] = struct{}{}
+	}
 
-		fi := FreshnessItem{
-			AssetID:        asset.ID,
-			Ticker:         asset.Ticker,
-			Name:           asset.Name,
-			ModelSupported: asset.ModelSupported,
-		}
-
-		// Check market status
-		marketOpen := true
-		if s.instruments != nil && asset.Exchange != "" {
-			open, err := s.instruments.IsMarketOpen(ctx, asset.Exchange)
-			if err == nil {
-				marketOpen = open
-			}
-		}
-
-		// Check candle data freshness
-		candles, _ := s.marketData.ListCandles(ctx, asset.Ticker, asset.Timeframe, time.Time{}, time.Time{}, 1)
-		if len(candles) > 0 {
-			lastCandle := candles[0].Timestamp
-			fi.LastCandleAt = &lastCandle
-			if now.Sub(lastCandle) < dataFreshnessThreshold {
-				fi.DataFresh = true
-				summary.FreshData++
-			} else {
-				if marketOpen {
-					fi.StaleReason = "candle data older than " + dataFreshnessThreshold.String()
-					summary.StaleData++
-				} else {
-					fi.DataFresh = true // Consider fresh if market is closed
-					fi.StaleReason = "market closed"
-					summary.FreshData++
-				}
-			}
-		} else {
-			if marketOpen {
-				fi.StaleReason = "no candle data available"
-				summary.StaleData++
-			} else {
-				fi.DataFresh = true
-				fi.StaleReason = "no data; market closed"
-				summary.FreshData++
-			}
-		}
-
-		// Check signal freshness
-		if !asset.ModelSupported {
-			fi.SignalFresh = false
-			if fi.StaleReason == "" {
-				fi.StaleReason = "watchlist-only (no ML signal)"
-			} else {
-				fi.StaleReason += "; watchlist-only (no ML signal)"
-			}
-			summary.WatchlistOnly++
-			summary.StaleSignals++
-		} else {
-			signals, _ := s.signalRepo.ListByAsset(ctx, asset.ID, 1)
+	for i := range summary.Items {
+		item := &summary.Items[i]
+		if _, ok := wlAssetIDs[item.AssetID]; ok && item.ModelSupported {
+			signals, _ := s.signalRepo.ListByAsset(ctx, userID, item.AssetID, 1)
 			if len(signals) > 0 {
 				lastSignal := signals[0].CreatedAt
-				fi.LastSignalAt = &lastSignal
+				item.LastSignalAt = &lastSignal
 				if now.Sub(lastSignal) < signalFreshnessThreshold {
-					fi.SignalFresh = true
+					item.SignalFresh = true
 					summary.FreshSignals++
 				} else {
-					if fi.StaleReason != "" {
-						fi.StaleReason += "; "
-					}
-					fi.StaleReason += "signal older than " + signalFreshnessThreshold.String()
 					summary.StaleSignals++
 				}
 			} else {
-				if fi.StaleReason != "" {
-					fi.StaleReason += "; "
-				}
-				fi.StaleReason += "no signals generated"
+				summary.StaleSignals++
+			}
+		} else {
+			if item.ModelSupported {
+				summary.WatchlistOnly++
 				summary.StaleSignals++
 			}
 		}
-
-		summary.Items = append(summary.Items, fi)
 	}
 
 	return summary, nil
@@ -268,11 +315,12 @@ type WatchlistRefreshResult struct {
 	FailedFactorsIDs []string `json:"failed_factors,omitempty"`
 }
 
-// RunWatchlistRefresh refreshes market data for all watchlist instruments.
-// This is a bridge/manual runner that simulates a data refresh by checking if
-// the instrument has candle data. In a full implementation this would call
-// the T-Bank data ingest adapter.
+// RunWatchlistRefresh refreshes market data for all watchlist instruments (or all assets if userID=0).
 func (s *WatchlistRefreshService) RunWatchlistRefresh(ctx context.Context, limit int) (domain.JobRun, error) {
+	return s.RunWatchlistRefreshForUser(ctx, 0, limit)
+}
+
+func (s *WatchlistRefreshService) RunWatchlistRefreshForUser(ctx context.Context, userID int64, limit int) (domain.JobRun, error) {
 	if s.jobRepo == nil {
 		return domain.JobRun{}, ErrJobsUnavailable
 	}
@@ -280,16 +328,17 @@ func (s *WatchlistRefreshService) RunWatchlistRefresh(ctx context.Context, limit
 	run, err := s.jobRepo.Create(ctx, domain.JobRun{
 		JobType: JobTypeWatchlistRefresh,
 		Status:  domain.JobStatusRunning,
-		Payload: map[string]any{"limit": limit},
+		Payload: map[string]any{"limit": limit, "user_id": userID},
 	})
 	if err != nil {
 		return domain.JobRun{}, err
 	}
 
-	result, jobErr := s.doWatchlistRefresh(ctx, limit)
+	result, jobErr := s.doWatchlistRefresh(ctx, userID, limit)
 
 	payload := map[string]any{
 		"limit":             limit,
+		"user_id":           userID,
 		"total_instruments": result.TotalInstruments,
 		"refreshed":         result.Refreshed,
 		"failed":            result.Failed,
@@ -319,92 +368,124 @@ func (s *WatchlistRefreshService) RunWatchlistRefresh(ctx context.Context, limit
 	return s.jobRepo.Finish(ctx, run.ID, status, payload, errMsg)
 }
 
-func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, limit int) (WatchlistRefreshResult, error) {
-	watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, "default")
-	if err != nil {
-		return WatchlistRefreshResult{}, fmt.Errorf("watchlist init: %w", err)
+func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID int64, limit int) (WatchlistRefreshResult, error) {
+	var assetIDs []string
+
+	if userID > 0 {
+		watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, userID, "default")
+		if err != nil {
+			return WatchlistRefreshResult{}, fmt.Errorf("watchlist init: %w", err)
+		}
+		items, err := s.watchlistRepo.ListItems(ctx, watchlist.ID)
+		if err != nil {
+			return WatchlistRefreshResult{}, fmt.Errorf("watchlist list: %w", err)
+		}
+		for _, it := range items {
+			assetIDs = append(assetIDs, it.AssetID)
+		}
+	} else {
+		// System-wide update for all active assets
+		assets, err := s.assetRepo.List(ctx)
+		if err != nil {
+			return WatchlistRefreshResult{}, fmt.Errorf("assets list: %w", err)
+		}
+		for _, a := range assets {
+			if a.IsActive {
+				assetIDs = append(assetIDs, a.ID)
+			}
+		}
 	}
 
-	items, err := s.watchlistRepo.ListItems(ctx, watchlist.ID)
-	if err != nil {
-		return WatchlistRefreshResult{}, fmt.Errorf("watchlist list: %w", err)
+	if limit > 0 && len(assetIDs) > limit {
+		assetIDs = assetIDs[:limit]
 	}
 
-	if limit > 0 && len(items) > limit {
-		items = items[:limit]
-	}
-
-	result := WatchlistRefreshResult{TotalInstruments: len(items)}
+	result := WatchlistRefreshResult{TotalInstruments: len(assetIDs)}
 	factorTimeframes := make(map[string]struct{})
 
-	for _, wlItem := range items {
-		asset, err := s.assetRepo.GetByID(ctx, wlItem.AssetID)
-		if err != nil {
-			result.Failed++
-			result.FailedAssetIDs = append(result.FailedAssetIDs, wlItem.AssetID)
-			continue
-		}
+	// Parallelize with concurrency limit
+	type assetResult struct {
+		assetID   string
+		failed    bool
+		timeframe string
+	}
+	resChan := make(chan assetResult, len(assetIDs))
+	sem := make(chan struct{}, 5) // Concurrency limit of 5
 
-		if asset.Timeframe != "" {
-			factorTimeframes[asset.Timeframe] = struct{}{}
-		}
+	for _, id := range assetIDs {
+		go func(assetID string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		// 1. Fetch and append new candles
-		if s.instruments != nil && asset.Ticker != "" {
-			inst, err := s.resolveAssetInstrument(ctx, asset)
+			res := assetResult{assetID: assetID}
+			defer func() { resChan <- res }()
+
+			// Per-asset context with timeout
+			assetCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			asset, err := s.assetRepo.GetByID(assetCtx, assetID)
 			if err != nil {
-				result.Failed++
-				result.FailedAssetIDs = append(result.FailedAssetIDs, asset.ID)
-				if s.logger != nil {
-					s.logger.Printf("watchlist refresh: %s instrument resolve failed: %v", asset.Ticker, err)
-				}
-				continue
-			}
-			asset = mergeAssetInstrument(asset, inst)
-
-			// Find last candle to determine start time
-			lastCands, _ := s.marketData.ListCandles(ctx, asset.Ticker, asset.Timeframe, time.Time{}, time.Time{}, 1)
-			from := time.Now().UTC().Add(-24 * time.Hour) // Default to last 24h if no data
-			if len(lastCands) > 0 {
-				from = lastCands[0].Timestamp.Add(time.Second)
+				res.failed = true
+				return
 			}
 
-			// Don't request if from is too close to now
-			if time.Since(from) > time.Minute {
-				newCands, err := s.instruments.GetCandles(ctx, inst.UID, asset.Timeframe, from, time.Now().UTC())
+			if asset.Timeframe != "" {
+				res.timeframe = asset.Timeframe
+			}
+
+			if s.instruments != nil && asset.Ticker != "" {
+				inst, err := s.resolveAssetInstrument(assetCtx, asset)
 				if err != nil {
-					if s.logger != nil {
-						s.logger.Printf("watchlist refresh: %s candles fetch failed: %v", asset.Ticker, err)
-					}
-					// We continue metadata update even if candles fail, but mark as failed for result
-					result.Failed++
-					result.FailedAssetIDs = append(result.FailedAssetIDs, asset.ID)
-				} else if len(newCands) > 0 {
-					for i := range newCands {
-						newCands[i].Ticker = asset.Ticker
-						newCands[i].Timeframe = asset.Timeframe
-					}
-					if err := s.marketData.AppendCandles(ctx, asset.Ticker, asset.Timeframe, newCands); err != nil {
+					res.failed = true
+					return
+				}
+				asset = mergeAssetInstrument(asset, inst)
+
+				lookbackStart := time.Now().UTC().Add(-30 * 24 * time.Hour)
+				lastCands, _ := s.marketData.ListCandles(assetCtx, asset.Ticker, asset.Timeframe, lookbackStart, time.Time{}, 1)
+				from := time.Now().UTC().Add(-24 * time.Hour)
+				if len(lastCands) > 0 {
+					from = lastCands[0].Timestamp
+				}
+
+				if time.Since(from) > time.Minute {
+					newCands, err := s.instruments.GetCandles(assetCtx, s.systemToken, inst.UID, asset.Timeframe, from, time.Now().UTC())
+					if err != nil {
+						res.failed = true
 						if s.logger != nil {
-							s.logger.Printf("watchlist refresh: %s candles append failed: %v", asset.Ticker, err)
+							s.logger.Printf("watchlist refresh: asset %s GetCandles failed: %v", asset.ID, err)
 						}
-						result.Failed++
-						result.FailedAssetIDs = append(result.FailedAssetIDs, asset.ID)
+					} else if len(newCands) > 0 {
+						for i := range newCands {
+							newCands[i].Ticker = asset.Ticker
+							newCands[i].Timeframe = asset.Timeframe
+						}
+						if err := s.marketData.AppendCandles(assetCtx, asset.Ticker, asset.Timeframe, newCands); err != nil {
+							res.failed = true
+						}
+					}
+				}
+
+				if err := s.assetRepo.Upsert(assetCtx, asset); err != nil {
+					if s.logger != nil {
+						s.logger.Printf("watchlist refresh: asset %s upsert failed: %v", asset.ID, err)
 					}
 				}
 			}
+		}(id)
+	}
 
-			// 2. Update asset metadata
-			if err := s.assetRepo.Upsert(ctx, asset); err != nil {
-				if s.logger != nil {
-					s.logger.Printf("watchlist refresh: asset %s upsert failed: %v", asset.ID, err)
-				}
-			}
+	for i := 0; i < len(assetIDs); i++ {
+		res := <-resChan
+		if res.failed {
+			result.Failed++
+			result.FailedAssetIDs = append(result.FailedAssetIDs, res.assetID)
+		} else {
+			result.Refreshed++
 		}
-
-		result.Refreshed++
-		if s.logger != nil {
-			s.logger.Printf("watchlist refresh: %s (%s) processed", asset.Ticker, asset.ID)
+		if res.timeframe != "" {
+			factorTimeframes[res.timeframe] = struct{}{}
 		}
 	}
 
@@ -426,11 +507,10 @@ func (s *WatchlistRefreshService) refreshFactorStatus(
 	s.refreshConfiguredFactors(ctx, result, timeframes, now)
 
 	for timeframe := range timeframes {
-		factors, err := s.marketData.ListFactors(ctx, timeframe, now.Add(-24*time.Hour), now)
+		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		factors, err := s.marketData.ListFactors(listCtx, timeframe, now.Add(-24*time.Hour), now)
+		cancel()
 		if err != nil {
-			if s.logger != nil {
-				s.logger.Printf("watchlist refresh: factor freshness check failed for timeframe=%s: %v", timeframe, err)
-			}
 			result.StaleFactors++
 			continue
 		}
@@ -456,9 +536,9 @@ func (s *WatchlistRefreshService) refreshFactorStatus(
 
 func (s *WatchlistRefreshService) resolveAssetInstrument(ctx context.Context, asset domain.Asset) (domain.TinkoffInstrument, error) {
 	if asset.InstrumentUID != "" {
-		return s.instruments.GetInstrumentByUID(ctx, asset.InstrumentUID)
+		return s.instruments.GetInstrumentByUID(ctx, s.systemToken, asset.InstrumentUID)
 	}
-	items, err := s.instruments.FindInstrument(ctx, asset.Ticker)
+	items, err := s.instruments.FindInstrument(ctx, s.systemToken, asset.Ticker)
 	if err != nil {
 		return domain.TinkoffInstrument{}, err
 	}
@@ -507,79 +587,92 @@ func (s *WatchlistRefreshService) refreshConfiguredFactors(
 		return
 	}
 
+	type factorRes struct {
+		alias     string
+		refreshed bool
+		failed    bool
+	}
+	resChan := make(chan factorRes, len(s.factorSpecs))
+
 	for _, spec := range s.factorSpecs {
-		if _, ok := timeframes[spec.Timeframe]; !ok && len(timeframes) > 0 {
-			continue
-		}
+		go func(sp FactorRefreshSpec) {
+			res := factorRes{alias: sp.Alias}
+			defer func() { resChan <- res }()
 
-		from := now.Add(-24 * time.Hour)
-		factors, err := s.marketData.ListFactors(ctx, spec.Timeframe, time.Time{}, time.Time{})
-		if err != nil {
-			result.FailedFactors++
-			result.FailedFactorsIDs = append(result.FailedFactorsIDs, spec.Alias)
-			continue
-		}
-		for _, factor := range factors {
-			if factor.Factor == spec.Alias && factor.Timestamp.After(from) {
-				from = factor.Timestamp.Add(time.Second)
+			if _, ok := timeframes[sp.Timeframe]; !ok && len(timeframes) > 0 {
+				return
 			}
-		}
-		if now.Sub(from) <= time.Minute {
-			continue
-		}
 
-		inst, err := s.resolveFactorInstrument(ctx, spec)
-		if err != nil {
-			result.FailedFactors++
-			result.FailedFactorsIDs = append(result.FailedFactorsIDs, spec.Alias)
-			if s.logger != nil {
-				s.logger.Printf("watchlist refresh: factor %s instrument resolve failed: %v", spec.Alias, err)
-			}
-			continue
-		}
+			factorCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
 
-		candles, err := s.instruments.GetCandles(ctx, inst.UID, spec.Timeframe, from, now)
-		if err != nil {
-			result.FailedFactors++
-			result.FailedFactorsIDs = append(result.FailedFactorsIDs, spec.Alias)
-			if s.logger != nil {
-				s.logger.Printf("watchlist refresh: factor %s candles fetch failed: %v", spec.Alias, err)
+			lookbackStart := now.Add(-30 * 24 * time.Hour)
+			from := lookbackStart
+			factors, err := s.marketData.ListFactors(factorCtx, sp.Timeframe, lookbackStart, time.Time{})
+			if err != nil {
+				res.failed = true
+				return
 			}
-			continue
-		}
-		if len(candles) == 0 {
-			continue
-		}
+			for _, factor := range factors {
+				if factor.Factor == sp.Alias && factor.Timestamp.After(from) {
+					from = factor.Timestamp
+				}
+			}
+			if now.Sub(from) <= time.Minute {
+				return
+			}
 
-		factorBars := make([]domain.FactorBar, 0, len(candles))
-		for _, candle := range candles {
-			factorBars = append(factorBars, domain.FactorBar{
-				Timestamp:  candle.Timestamp,
-				Factor:     spec.Alias,
-				Open:       candle.Open,
-				High:       candle.High,
-				Low:        candle.Low,
-				Close:      candle.Close,
-				Volume:     candle.Volume,
-				Timeframe:  spec.Timeframe,
-				Source:     candle.Source,
-				IngestedAt: candle.IngestedAt,
-			})
-		}
-		if err := s.marketData.AppendFactors(ctx, spec.Alias, spec.Timeframe, factorBars); err != nil {
-			result.FailedFactors++
-			result.FailedFactorsIDs = append(result.FailedFactorsIDs, spec.Alias)
-			if s.logger != nil {
-				s.logger.Printf("watchlist refresh: factor %s append failed: %v", spec.Alias, err)
+			inst, err := s.resolveFactorInstrument(factorCtx, sp)
+			if err != nil {
+				res.failed = true
+				return
 			}
-			continue
+
+			candles, err := s.instruments.GetCandles(factorCtx, s.systemToken, inst.UID, sp.Timeframe, from, now)
+			if err != nil {
+				res.failed = true
+				return
+			}
+			if len(candles) == 0 {
+				return
+			}
+
+			factorBars := make([]domain.FactorBar, 0, len(candles))
+			for _, candle := range candles {
+				factorBars = append(factorBars, domain.FactorBar{
+					Timestamp:  candle.Timestamp,
+					Factor:     sp.Alias,
+					Open:       candle.Open,
+					High:       candle.High,
+					Low:        candle.Low,
+					Close:      candle.Close,
+					Volume:     candle.Volume,
+					Timeframe:  sp.Timeframe,
+					Source:     candle.Source,
+					IngestedAt: candle.IngestedAt,
+				})
+			}
+			if err := s.marketData.AppendFactors(factorCtx, sp.Alias, sp.Timeframe, factorBars); err != nil {
+				res.failed = true
+				return
+			}
+			res.refreshed = true
+		}(spec)
+	}
+
+	for i := 0; i < len(s.factorSpecs); i++ {
+		res := <-resChan
+		if res.failed {
+			result.FailedFactors++
+			result.FailedFactorsIDs = append(result.FailedFactorsIDs, res.alias)
+		} else if res.refreshed {
+			result.FactorsRefreshed++
 		}
-		result.FactorsRefreshed++
 	}
 }
 
 func (s *WatchlistRefreshService) resolveFactorInstrument(ctx context.Context, spec FactorRefreshSpec) (domain.TinkoffInstrument, error) {
-	items, err := s.instruments.FindInstrument(ctx, spec.Ticker)
+	items, err := s.instruments.FindInstrument(ctx, s.systemToken, spec.Ticker)
 	if err != nil {
 		return domain.TinkoffInstrument{}, err
 	}
@@ -611,6 +704,10 @@ type WatchlistSignalResult struct {
 
 // RunWatchlistSignalRefresh generates latest signals for model-supported watchlist instruments.
 func (s *WatchlistRefreshService) RunWatchlistSignalRefresh(ctx context.Context) (domain.JobRun, error) {
+	return s.RunWatchlistSignalRefreshForUser(ctx, 0)
+}
+
+func (s *WatchlistRefreshService) RunWatchlistSignalRefreshForUser(ctx context.Context, userID int64) (domain.JobRun, error) {
 	if s.jobRepo == nil {
 		return domain.JobRun{}, ErrJobsUnavailable
 	}
@@ -624,7 +721,7 @@ func (s *WatchlistRefreshService) RunWatchlistSignalRefresh(ctx context.Context)
 		return domain.JobRun{}, err
 	}
 
-	result, jobErr := s.doSignalRefresh(ctx)
+	result, jobErr := s.doSignalRefresh(ctx, userID)
 
 	payload := map[string]any{
 		"total_instruments": result.TotalInstruments,
@@ -653,68 +750,111 @@ func (s *WatchlistRefreshService) RunWatchlistSignalRefresh(ctx context.Context)
 	return s.jobRepo.Finish(ctx, run.ID, status, payload, errMsg)
 }
 
-func (s *WatchlistRefreshService) doSignalRefresh(ctx context.Context) (WatchlistSignalResult, error) {
-	watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, "default")
-	if err != nil {
-		return WatchlistSignalResult{}, fmt.Errorf("watchlist init: %w", err)
-	}
+func (s *WatchlistRefreshService) doSignalRefresh(ctx context.Context, userID int64) (WatchlistSignalResult, error) {
+	var assetIDs []string
 
-	items, err := s.watchlistRepo.ListItems(ctx, watchlist.ID)
-	if err != nil {
-		return WatchlistSignalResult{}, fmt.Errorf("watchlist list: %w", err)
-	}
-
-	result := WatchlistSignalResult{TotalInstruments: len(items)}
-
-	for _, wlItem := range items {
-		asset, err := s.assetRepo.GetByID(ctx, wlItem.AssetID)
+	if userID > 0 {
+		watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, userID, "default")
 		if err != nil {
-			result.Skipped++
-			result.SkippedAssetIDs = append(result.SkippedAssetIDs, wlItem.AssetID)
-			continue
+			return WatchlistSignalResult{}, fmt.Errorf("watchlist init: %w", err)
 		}
-
-		if !asset.ModelSupported {
-			result.Skipped++
-			result.SkippedAssetIDs = append(result.SkippedAssetIDs, asset.ID)
-			if s.logger != nil {
-				s.logger.Printf("watchlist signal: %s skipped (watchlist-only, model_supported=false)", asset.Ticker)
+		items, err := s.watchlistRepo.ListItems(ctx, watchlist.ID)
+		if err != nil {
+			return WatchlistSignalResult{}, fmt.Errorf("watchlist list: %w", err)
+		}
+		for _, it := range items {
+			assetIDs = append(assetIDs, it.AssetID)
+		}
+	} else {
+		// System-wide signal refresh for all model-supported assets
+		assets, err := s.assetRepo.List(ctx)
+		if err != nil {
+			return WatchlistSignalResult{}, fmt.Errorf("assets list: %w", err)
+		}
+		for _, a := range assets {
+			if a.ModelSupported && a.IsActive {
+				assetIDs = append(assetIDs, a.ID)
 			}
-			continue
 		}
+	}
 
-		result.ModelSupported++
+	result := WatchlistSignalResult{TotalInstruments: len(assetIDs)}
 
-		// Check data availability: need candle data to generate signals
-		candles, _ := s.marketData.ListCandles(ctx, asset.Ticker, asset.Timeframe, time.Time{}, time.Time{}, 1)
-		if len(candles) == 0 {
-			result.Skipped++
-			result.SkippedAssetIDs = append(result.SkippedAssetIDs, asset.ID)
-			if s.logger != nil {
-				s.logger.Printf("watchlist signal: %s skipped (no candle data)", asset.Ticker)
-			}
-			continue
-		}
+	type signalResult struct {
+		assetID          string
+		modelSupported   bool
+		signalGenerated  bool
+		failed           bool
+		skipped          bool
+	}
+	resChan := make(chan signalResult, len(assetIDs))
+	sem := make(chan struct{}, 3) // Signal generation is heavier, so lower concurrency
 
-		// Run analysis to generate latest signal
-		if s.analysis != nil {
-			_, err := s.analysis.Run(ctx, RunAnalysisInput{
-				AssetID:      asset.ID,
-				ModelVersion: "active",
-				Timeframe:    asset.Timeframe,
-			})
+	for _, id := range assetIDs {
+		go func(assetID string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			res := signalResult{assetID: assetID}
+			defer func() { resChan <- res }()
+
+			assetCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			defer cancel()
+
+			asset, err := s.assetRepo.GetByID(assetCtx, assetID)
 			if err != nil {
-				result.Failed++
-				result.FailedAssetIDs = append(result.FailedAssetIDs, asset.ID)
-				if s.logger != nil {
-					s.logger.Printf("watchlist signal: %s failed: %v", asset.Ticker, err)
+				res.skipped = true
+				return
+			}
+
+			if !asset.ModelSupported {
+				res.skipped = true
+				return
+			}
+
+			res.modelSupported = true
+
+			lookbackStart := time.Now().UTC().Add(-30 * 24 * time.Hour)
+			candles, _ := s.marketData.ListCandles(assetCtx, asset.Ticker, asset.Timeframe, lookbackStart, time.Time{}, 1)
+			if len(candles) == 0 {
+				res.skipped = true
+				return
+			}
+
+			if s.analysis != nil {
+				_, err := s.analysis.Run(assetCtx, RunAnalysisInput{
+					AssetID:      asset.ID,
+					UserID:       userID,
+					ModelVersion: "active",
+					Timeframe:    asset.Timeframe,
+				})
+				if err != nil {
+					res.failed = true
+					if s.logger != nil {
+						s.logger.Printf("watchlist signal refresh: asset %s analysis failed: %v", asset.ID, err)
+					}
+					return
 				}
-				continue
+				res.signalGenerated = true
 			}
+		}(id)
+	}
+
+	for i := 0; i < len(assetIDs); i++ {
+		res := <-resChan
+		if res.modelSupported {
+			result.ModelSupported++
+		}
+		if res.signalGenerated {
 			result.SignalsGenerated++
-			if s.logger != nil {
-				s.logger.Printf("watchlist signal: %s signal generated", asset.Ticker)
-			}
+		}
+		if res.failed {
+			result.Failed++
+			result.FailedAssetIDs = append(result.FailedAssetIDs, res.assetID)
+		}
+		if res.skipped {
+			result.Skipped++
+			result.SkippedAssetIDs = append(result.SkippedAssetIDs, res.assetID)
 		}
 	}
 

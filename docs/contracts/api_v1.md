@@ -25,7 +25,7 @@
 
 ## Endpoint status
 
-### `GET /health`
+### `GET /api/v1/health`
 
 - назначение: liveness check backend service
 - status: implemented
@@ -40,7 +40,7 @@
 }
 ```
 
-### `GET /ready`
+### `GET /api/v1/ready`
 
 - назначение: readiness check backend service
 - status: implemented
@@ -55,7 +55,7 @@
 }
 ```
 
-### `GET /assets`
+### `GET /api/v1/assets`
 
 - назначение: список инструментов для мониторинга
 - status: implemented
@@ -76,7 +76,7 @@
 }
 ```
 
-### `GET /assets/{id}/candles`
+### `GET /api/v1/assets/{id}/candles`
 
 - назначение: исторические свечи по инструменту
 - status: implemented
@@ -103,7 +103,7 @@
 }
 ```
 
-### `GET /assets/{id}/factors`
+### `GET /api/v1/assets/{id}/factors`
 
 - назначение: связанные внешние факторы
 - status: implemented
@@ -130,7 +130,7 @@
 }
 ```
 
-### `GET /assets/{id}/signals`
+### `GET /api/v1/assets/{id}/signals`
 
 - назначение: история signal runs по выбранному инструменту
 - status: implemented
@@ -169,7 +169,7 @@
 }
 ```
 
-### `POST /analysis/run`
+### `POST /api/v1/assets/{id}/analysis/run`
 
 - назначение: запуск расчёта вероятности сигнала
 - status: implemented with deterministic Sprint 1 stub runtime via active model manifest
@@ -177,7 +177,6 @@
 
 ```json
 {
-  "asset_id": "SBER",
   "as_of_time": "2026-04-09T09:55:00Z",
   "model_version": "active",
   "timeframe": "5m"
@@ -205,7 +204,7 @@
 }
 ```
 
-### `GET /signals/latest`
+### `GET /api/v1/signals/latest`
 
 - назначение: получение последних сигналов
 - status: implemented
@@ -234,7 +233,31 @@
 }
 ```
 
-### `GET /ml/research/overview`
+### `GET /api/v1/alerts/signal-events`
+
+- назначение: получение событий по сигналам
+- status: implemented
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "signal_run_id": 101,
+      "asset_id": "SBER",
+      "event_type": "signal_generated",
+      "created_at": "2026-04-09T09:55:01Z",
+      "payload": {
+        "direction": "down",
+        "probability": 0.7991
+      }
+    }
+  ]
+}
+```
+
+### `GET /api/v1/admin/ml/research/overview`
 
 - назначение: latest dataset/research/calibration summary для operator GUI
 - status: implemented
@@ -245,7 +268,7 @@
   - `source_paths`
   - `warnings`
 
-### `GET /ml/research/documents`
+### `GET /api/v1/admin/ml/research/documents`
 
 - назначение: latest безопасный набор artifact documents для GUI drill-down
 - status: implemented
@@ -266,7 +289,7 @@
 }
 ```
 
-### `GET /ml/policy/production`
+### `GET /api/v1/admin/ml/policy/production`
 
 - назначение: normalized production-candidate policy для Sprint 3 runtime/GUI слоя
 - status: implemented
@@ -302,7 +325,7 @@
 }
 ```
 
-### `GET /ml/policy/validation-runs`
+### `GET /api/v1/admin/ml/policy/validation-runs`
 
 - назначение: список сохранённых проверок production policy перед shadow/live promotion
 - status: implemented
@@ -341,7 +364,7 @@
 }
 ```
 
-### `POST /ml/policy/validation-runs`
+### `POST /api/v1/admin/ml/policy/validation-runs`
 
 - назначение: сохранить текущий normalized production policy snapshot как validation run
 - status: implemented
@@ -353,9 +376,9 @@
 }
 ```
 
-- response: один объект из `GET /ml/policy/validation-runs`.
+- response: один объект из `GET /api/v1/admin/ml/policy/validation-runs`.
 
-### `PATCH /ml/policy/validation-runs/{id}`
+### `PATCH /api/v1/admin/ml/policy/validation-runs/{id}`
 
 - назначение: операторский переход validation run между decision states перед shadow/live promotion
 - status: implemented
@@ -369,9 +392,9 @@
 }
 ```
 
-- response: один объект из `GET /ml/policy/validation-runs`.
+- response: один объект из `GET /api/v1/admin/ml/policy/validation-runs`.
 
-### `GET /ml/policy/shadow-summary`
+### `GET /api/v1/admin/ml/policy/shadow-summary`
 
 - назначение: aggregate snapshot по сигналам, сохранённым с persisted policy metadata в `signal_runs`
 - status: implemented
@@ -398,7 +421,7 @@
 }
 ```
 
-### `GET /ml/policy/outcomes`
+### `GET /api/v1/admin/ml/policy/outcomes`
 
 - назначение: Sprint 4 forward-validation summary по matured shadow/live signals
 - status: implemented over persisted signals, stored outcomes and available candles
@@ -442,18 +465,18 @@
 }
 ```
 
-### `POST /ml/policy/outcomes`
+### `POST /api/v1/admin/ml/policy/outcomes`
 
 - назначение: вручную materialize все matured outcomes для активного `shadow_live`/`promoted` validation run
 - status: implemented
 - query params:
   - `limit`
-- response: тот же payload, что и `GET /ml/policy/outcomes`, уже после upsert в `signal_outcomes`
+- response: тот же payload, что и `GET /api/v1/admin/ml/policy/outcomes`, уже после upsert в `signal_outcomes`
 - notes:
   - endpoint идемпотентен;
   - повторный запуск обновляет persisted outcome rows и возвращает актуальный summary.
 
-### `GET /ml/policy/outcomes/history`
+### `GET /api/v1/admin/ml/policy/outcomes/history`
 
 - назначение: получить последние matured signal outcomes для active `shadow_live`/`promoted` policy snapshot
 - status: implemented
@@ -484,7 +507,7 @@
 }
 ```
 
-### `POST /jobs/outcomes/materialize`
+### `POST /api/v1/jobs/outcomes/materialize`
 
 - назначение: запустить materialization matured outcomes как tracked backend job
 - status: implemented
@@ -511,7 +534,7 @@
 }
 ```
 
-### `GET /jobs/runs`
+### `GET /api/v1/jobs/runs`
 
 - назначение: получить последние job runs backend services
 - status: implemented
@@ -541,7 +564,7 @@
 }
 ```
 
-### `GET /jobs/scheduler`
+### `GET /api/v1/jobs/scheduler`
 
 - назначение: получить effective status/config recurring scheduler для outcome materialization
 - status: implemented
@@ -556,7 +579,7 @@
 }
 ```
 
-### `GET /watchlist`
+### `GET /api/v1/watchlist`
 
 - назначение: список наблюдаемых инструментов
 - status: implemented for default watchlist with enriched asset metadata
@@ -591,7 +614,7 @@
 }
 ```
 
-### `POST /watchlist`
+### `POST /api/v1/watchlist`
 
 - назначение: добавление инструмента в список наблюдения
 - status: implemented for default watchlist
@@ -612,7 +635,7 @@ Alternative request for discovered catalog instruments:
 }
 ```
 
-### `GET /instruments/search`
+### `GET /api/v1/instruments/search`
 
 - назначение: поиск инструментов через T-Bank InstrumentsService
 - status: implemented
@@ -642,15 +665,37 @@ Alternative request for discovered catalog instruments:
 }
 ```
 
-### `GET /instruments/{uid}`
+### `GET /api/v1/instruments/{uid}`
 
 - назначение: получить детальную metadata по выбранному instrument uid
 - status: implemented
-- response: same DTO as `GET /instruments/search`
+- response: same DTO as `GET /api/v1/instruments/search`
 
-### `POST /notifications/rules`
+### `GET /api/v1/alerts/rules`
+
+- назначение: список правил уведомлений
+- status: implemented
+- response example:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "asset_id": "SBER",
+      "enabled": true,
+      "direction": "up",
+      "threshold": 0.72,
+      "cooldown_minutes": 60
+    }
+  ]
+}
+```
+
+### `POST /api/v1/alerts/rules`
 
 - назначение: создание или изменение правила уведомлений
+- status: implemented
 - request example:
 
 ```json

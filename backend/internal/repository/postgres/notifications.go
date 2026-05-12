@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"invest/backend/internal/domain"
+	"github.com/lib/pq"
 )
 
 type NotificationRepository struct {
@@ -17,12 +19,15 @@ func NewNotificationRepository(db *sql.DB) *NotificationRepository {
 	return &NotificationRepository{db: db}
 }
 
-func (r *NotificationRepository) ListRules(ctx context.Context) ([]domain.NotificationRule, error) {
+func (r *NotificationRepository) ListRules(ctx context.Context, userID int64) ([]domain.NotificationRule, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ticker, event_type, severity, direction, model_version, threshold, is_enabled, cooldown_minutes, created_at, updated_at
+		SELECT id, user_id, ticker, event_type, target_indicator, operator, threshold, secondary_threshold, 
+		       severity, direction, model_version, is_enabled, cooldown_minutes, expires_at, trigger_mode, delivery_channels,
+		       created_at, updated_at
 		FROM notification_rules_v2
+		WHERE user_id = $1
 		ORDER BY id ASC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -31,29 +36,42 @@ func (r *NotificationRepository) ListRules(ctx context.Context) ([]domain.Notifi
 	var items []domain.NotificationRule
 	for rows.Next() {
 		var item domain.NotificationRule
-		var ticker sql.NullString
-		var direction sql.NullString
-		var modelVersion sql.NullString
-		var threshold sql.NullFloat64
+		var ticker, targetIndicator, operator, direction, modelVersion sql.NullString
+		var threshold, secondaryThreshold sql.NullFloat64
+		var expiresAt *time.Time
+		var deliveryChannels pq.StringArray
+
 		if err := rows.Scan(
 			&item.ID,
+			&item.UserID,
 			&ticker,
 			&item.EventType,
+			&targetIndicator,
+			&operator,
+			&threshold,
+			&secondaryThreshold,
 			&item.Severity,
 			&direction,
 			&modelVersion,
-			&threshold,
 			&item.IsEnabled,
 			&item.CooldownMinutes,
+			&expiresAt,
+			&item.TriggerMode,
+			&deliveryChannels,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		item.Ticker = ticker.String
+		item.TargetIndicator = targetIndicator.String
+		item.Operator = operator.String
 		item.Direction = direction.String
 		item.ModelVersion = modelVersion.String
 		item.Threshold = threshold.Float64
+		item.SecondaryThreshold = secondaryThreshold.Float64
+		item.ExpiresAt = expiresAt
+		item.DeliveryChannels = []string(deliveryChannels)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -61,9 +79,11 @@ func (r *NotificationRepository) ListRules(ctx context.Context) ([]domain.Notifi
 
 func (r *NotificationRepository) ListActiveRules(ctx context.Context) ([]domain.NotificationRule, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ticker, event_type, severity, direction, model_version, threshold, is_enabled, cooldown_minutes, created_at, updated_at
+		SELECT id, user_id, ticker, event_type, target_indicator, operator, threshold, secondary_threshold, 
+		       severity, direction, model_version, is_enabled, cooldown_minutes, expires_at, trigger_mode, delivery_channels,
+		       created_at, updated_at
 		FROM notification_rules_v2
-		WHERE is_enabled = TRUE
+		WHERE is_enabled = TRUE AND (expires_at IS NULL OR expires_at > NOW())
 	`)
 	if err != nil {
 		return nil, err
@@ -73,54 +93,77 @@ func (r *NotificationRepository) ListActiveRules(ctx context.Context) ([]domain.
 	var items []domain.NotificationRule
 	for rows.Next() {
 		var item domain.NotificationRule
-		var ticker sql.NullString
-		var direction sql.NullString
-		var modelVersion sql.NullString
-		var threshold sql.NullFloat64
+		var ticker, targetIndicator, operator, direction, modelVersion sql.NullString
+		var threshold, secondaryThreshold sql.NullFloat64
+		var expiresAt *time.Time
+		var deliveryChannels pq.StringArray
+
 		if err := rows.Scan(
 			&item.ID,
+			&item.UserID,
 			&ticker,
 			&item.EventType,
+			&targetIndicator,
+			&operator,
+			&threshold,
+			&secondaryThreshold,
 			&item.Severity,
 			&direction,
 			&modelVersion,
-			&threshold,
 			&item.IsEnabled,
 			&item.CooldownMinutes,
+			&expiresAt,
+			&item.TriggerMode,
+			&deliveryChannels,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		item.Ticker = ticker.String
+		item.TargetIndicator = targetIndicator.String
+		item.Operator = operator.String
 		item.Direction = direction.String
 		item.ModelVersion = modelVersion.String
 		item.Threshold = threshold.Float64
+		item.SecondaryThreshold = secondaryThreshold.Float64
+		item.ExpiresAt = expiresAt
+		item.DeliveryChannels = []string(deliveryChannels)
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-func (r *NotificationRepository) GetRuleByID(ctx context.Context, id int64) (domain.NotificationRule, error) {
+func (r *NotificationRepository) GetRuleByID(ctx context.Context, id int64, userID int64) (domain.NotificationRule, error) {
 	var item domain.NotificationRule
-	var ticker sql.NullString
-	var direction sql.NullString
-	var modelVersion sql.NullString
-	var threshold sql.NullFloat64
+	var ticker, targetIndicator, operator, direction, modelVersion sql.NullString
+	var threshold, secondaryThreshold sql.NullFloat64
+	var expiresAt *time.Time
+	var deliveryChannels pq.StringArray
+
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, ticker, event_type, severity, direction, model_version, threshold, is_enabled, cooldown_minutes, created_at, updated_at
+		SELECT id, user_id, ticker, event_type, target_indicator, operator, threshold, secondary_threshold, 
+		       severity, direction, model_version, is_enabled, cooldown_minutes, expires_at, trigger_mode, delivery_channels,
+		       created_at, updated_at
 		FROM notification_rules_v2
-		WHERE id = $1
-	`, id).Scan(
+		WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(
 		&item.ID,
+		&item.UserID,
 		&ticker,
 		&item.EventType,
+		&targetIndicator,
+		&operator,
+		&threshold,
+		&secondaryThreshold,
 		&item.Severity,
 		&direction,
 		&modelVersion,
-		&threshold,
 		&item.IsEnabled,
 		&item.CooldownMinutes,
+		&expiresAt,
+		&item.TriggerMode,
+		&deliveryChannels,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
@@ -128,26 +171,48 @@ func (r *NotificationRepository) GetRuleByID(ctx context.Context, id int64) (dom
 		return domain.NotificationRule{}, err
 	}
 	item.Ticker = ticker.String
+	item.TargetIndicator = targetIndicator.String
+	item.Operator = operator.String
 	item.Direction = direction.String
 	item.ModelVersion = modelVersion.String
 	item.Threshold = threshold.Float64
+	item.SecondaryThreshold = secondaryThreshold.Float64
+	item.ExpiresAt = expiresAt
+	item.DeliveryChannels = []string(deliveryChannels)
 	return item, nil
 }
 
 func (r *NotificationRepository) CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
+	if rule.TriggerMode == "" {
+		rule.TriggerMode = "once"
+	}
+	if len(rule.DeliveryChannels) == 0 {
+		rule.DeliveryChannels = []string{"app"}
+	}
+
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO notification_rules_v2 (ticker, event_type, severity, direction, model_version, threshold, is_enabled, cooldown_minutes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO notification_rules_v2 (
+			user_id, ticker, event_type, target_indicator, operator, threshold, secondary_threshold, 
+			severity, direction, model_version, is_enabled, cooldown_minutes, expires_at, trigger_mode, delivery_channels
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id, created_at, updated_at
 	`,
+		rule.UserID,
 		nullString(rule.Ticker),
 		rule.EventType,
+		nullString(rule.TargetIndicator),
+		nullString(rule.Operator),
+		nullFloat(rule.Threshold),
+		nullFloat(rule.SecondaryThreshold),
 		rule.Severity,
 		nullString(rule.Direction),
 		nullString(rule.ModelVersion),
-		nullFloat(rule.Threshold),
 		rule.IsEnabled,
 		rule.CooldownMinutes,
+		rule.ExpiresAt,
+		rule.TriggerMode,
+		stringArray(rule.DeliveryChannels),
 	).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		return domain.NotificationRule{}, err
@@ -156,29 +221,49 @@ func (r *NotificationRepository) CreateRule(ctx context.Context, rule domain.Not
 }
 
 func (r *NotificationRepository) UpdateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
+	if rule.TriggerMode == "" {
+		rule.TriggerMode = "once"
+	}
+	if len(rule.DeliveryChannels) == 0 {
+		rule.DeliveryChannels = []string{"app"}
+	}
+
 	err := r.db.QueryRowContext(ctx, `
 		UPDATE notification_rules_v2
-		SET ticker = $2,
-		    event_type = $3,
-		    severity = $4,
-		    direction = $5,
-		    model_version = $6,
+		SET ticker = $3,
+		    event_type = $4,
+		    target_indicator = $5,
+		    operator = $6,
 		    threshold = $7,
-		    is_enabled = $8,
-		    cooldown_minutes = $9,
+		    secondary_threshold = $8,
+		    severity = $9,
+		    direction = $10,
+		    model_version = $11,
+		    is_enabled = $12,
+		    cooldown_minutes = $13,
+		    expires_at = $14,
+		    trigger_mode = $15,
+		    delivery_channels = $16,
 		    updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND user_id = $2
 		RETURNING updated_at
 	`,
 		rule.ID,
+		rule.UserID,
 		nullString(rule.Ticker),
 		rule.EventType,
+		nullString(rule.TargetIndicator),
+		nullString(rule.Operator),
+		nullFloat(rule.Threshold),
+		nullFloat(rule.SecondaryThreshold),
 		rule.Severity,
 		nullString(rule.Direction),
 		nullString(rule.ModelVersion),
-		nullFloat(rule.Threshold),
 		rule.IsEnabled,
 		rule.CooldownMinutes,
+		rule.ExpiresAt,
+		rule.TriggerMode,
+		stringArray(rule.DeliveryChannels),
 	).Scan(&rule.UpdatedAt)
 	if err != nil {
 		return domain.NotificationRule{}, err
@@ -186,8 +271,8 @@ func (r *NotificationRepository) UpdateRule(ctx context.Context, rule domain.Not
 	return rule, nil
 }
 
-func (r *NotificationRepository) DeleteRule(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM notification_rules_v2 WHERE id = $1`, id)
+func (r *NotificationRepository) DeleteRule(ctx context.Context, id int64, userID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM notification_rules_v2 WHERE id = $1 AND user_id = $2`, id, userID)
 	return err
 }
 
@@ -221,13 +306,30 @@ func (r *NotificationRepository) CreateEvent(ctx context.Context, event domain.N
 	return event, nil
 }
 
-func (r *NotificationRepository) ListLatestEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, rule_id, signal_event_id, event_type, severity, model_version, ticker, message, payload, delivery_status, delivery_attempts, created_at
-		FROM notification_events
-		ORDER BY created_at DESC, id DESC
-		LIMIT $1
-	`, limit)
+func (r *NotificationRepository) ListLatestEvents(ctx context.Context, userID int64, limit int) ([]domain.NotificationEvent, error) {
+	query := `
+		SELECT e.id, e.rule_id, e.signal_event_id, e.event_type, e.severity, e.model_version, e.ticker, e.message, e.payload, e.delivery_status, e.delivery_attempts, e.created_at
+		FROM notification_events e
+	`
+	var rows *sql.Rows
+	var err error
+
+	if userID == 0 {
+		query += `
+			ORDER BY e.created_at DESC, e.id DESC
+			LIMIT $1
+		`
+		rows, err = r.db.QueryContext(ctx, query, limit)
+	} else {
+		query += `
+			JOIN notification_rules_v2 nr ON e.rule_id = nr.id
+			WHERE nr.user_id = $1
+			ORDER BY e.created_at DESC, e.id DESC
+			LIMIT $2
+		`
+		rows, err = r.db.QueryContext(ctx, query, userID, limit)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -295,18 +397,4 @@ func (r *NotificationRepository) GetLatestEventForRule(ctx context.Context, rule
 		_ = json.Unmarshal(rawPayload, &item.Payload)
 	}
 	return item, nil
-}
-
-func nullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
-}
-
-func nullFloat(f float64) sql.NullFloat64 {
-	if f == 0 {
-		return sql.NullFloat64{}
-	}
-	return sql.NullFloat64{Float64: f, Valid: true}
 }

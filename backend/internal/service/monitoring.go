@@ -110,7 +110,7 @@ func (s *MonitoringService) GetSummary(ctx context.Context) (MonitoringSummary, 
 	}
 
 	// 2. Signals & Freshness
-	latestSignals, err := s.signalRepo.ListLatest(ctx, 1)
+	latestSignals, err := s.signalRepo.ListLatest(ctx, 0, 1)
 	if err != nil {
 		summary.Items = append(summary.Items, HealthItem{Name: "signal_repository", Status: "error", Message: "failed to list latest signals: " + err.Error()})
 		summary.updateStatus("error")
@@ -138,7 +138,7 @@ func (s *MonitoringService) GetSummary(ctx context.Context) (MonitoringSummary, 
 			if !a.IsActive {
 				continue
 			}
-			sig, err := s.signalRepo.ListByAsset(ctx, a.ID, 1)
+			sig, err := s.signalRepo.ListByAsset(ctx, 0, a.ID, 1)
 			if err != nil || len(sig) == 0 || time.Since(sig[0].AsOfTime) > 24*time.Hour {
 				summary.Freshness.StaleAssets++
 			}
@@ -172,7 +172,7 @@ func (s *MonitoringService) GetSummary(ctx context.Context) (MonitoringSummary, 
 
 	// 4. Notifications
 	if s.notification != nil {
-		recentEvents, err := s.notification.ListLatestEvents(ctx, 100)
+		recentEvents, err := s.notification.ListLatestEvents(ctx, 0, 100)
 		if err != nil {
 			summary.Items = append(summary.Items, HealthItem{Name: "notification_repository", Status: "warn", Message: "failed to list notification events: " + err.Error()})
 			summary.updateStatus("warn")

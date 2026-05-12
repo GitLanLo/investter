@@ -56,12 +56,13 @@ func (r *SignalOutcomeRepository) Upsert(ctx context.Context, outcome domain.Sig
 
 func (r *SignalOutcomeRepository) ListByPolicySnapshot(
 	ctx context.Context,
+	userID int64,
 	modelName string,
 	calibrationMethod string,
 	datasetVersion string,
 	limit int,
 ) ([]domain.SignalOutcome, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	query := `
 		SELECT
 			o.id,
 			o.signal_run_id,
@@ -79,9 +80,25 @@ func (r *SignalOutcomeRepository) ListByPolicySnapshot(
 		WHERE s.policy_model_name = $1
 		  AND s.policy_calibration_method = $2
 		  AND s.policy_dataset_version = $3
-		ORDER BY s.as_of_time DESC, o.id DESC
-		LIMIT $4
-	`, modelName, calibrationMethod, datasetVersion, limit)
+	`
+	var rows *sql.Rows
+	var err error
+
+	if userID == 0 {
+		query += `
+			ORDER BY s.as_of_time DESC, o.id DESC
+			LIMIT $4
+		`
+		rows, err = r.db.QueryContext(ctx, query, modelName, calibrationMethod, datasetVersion, limit)
+	} else {
+		query += `
+			AND s.user_id = $4
+			ORDER BY s.as_of_time DESC, o.id DESC
+			LIMIT $5
+		`
+		rows, err = r.db.QueryContext(ctx, query, modelName, calibrationMethod, datasetVersion, userID, limit)
+	}
+
 	if err != nil {
 		return nil, err
 	}

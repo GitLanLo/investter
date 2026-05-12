@@ -1,0 +1,9 @@
+CREATE TABLE user_tinkoff_credentials (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_encrypted BYTEA NOT NULL,
+    token_nonce BYTEA NOT NULL,
+    token_hint VARCHAR(50) NOT NULL,
+    is_sandbox BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

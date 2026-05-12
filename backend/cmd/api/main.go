@@ -49,7 +49,7 @@ func main() {
 		domain.ModelRegistryEntry{
 			ModelVersion:         "sprint8_gru_1h_h24_w96",
 			ModelType:            "gru",
-			Status:               domain.ModelStatusActive,
+			Status:               domain.ModelStatusInactive,
 			Timeframe:            "1h",
 			HorizonBars:          24,
 			FeatureSchemaVersion: "sprint8",

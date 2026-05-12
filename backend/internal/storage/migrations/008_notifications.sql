@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS notification_rules_v2 (
     severity TEXT NOT NULL,
     direction TEXT,
     model_version TEXT,
-    threshold NUMERIC(8,6),
+    threshold NUMERIC(24,8),
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     cooldown_minutes INT NOT NULL DEFAULT 60,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

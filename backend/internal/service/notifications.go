@@ -17,8 +17,8 @@ func NewNotificationService(repo repository.NotificationRepository) *Notificatio
 	return &NotificationService{repo: repo}
 }
 
-func (s *NotificationService) ListRules(ctx context.Context) ([]domain.NotificationRule, error) {
-	return s.repo.ListRules(ctx)
+func (s *NotificationService) ListRules(ctx context.Context, userID int64) ([]domain.NotificationRule, error) {
+	return s.repo.ListRules(ctx, userID)
 }
 
 func (s *NotificationService) CreateRule(ctx context.Context, rule domain.NotificationRule) (domain.NotificationRule, error) {
@@ -29,12 +29,12 @@ func (s *NotificationService) UpdateRule(ctx context.Context, rule domain.Notifi
 	return s.repo.UpdateRule(ctx, rule)
 }
 
-func (s *NotificationService) DeleteRule(ctx context.Context, id int64) error {
-	return s.repo.DeleteRule(ctx, id)
+func (s *NotificationService) DeleteRule(ctx context.Context, id int64, userID int64) error {
+	return s.repo.DeleteRule(ctx, id, userID)
 }
 
-func (s *NotificationService) ListEvents(ctx context.Context, limit int) ([]domain.NotificationEvent, error) {
-	return s.repo.ListLatestEvents(ctx, limit)
+func (s *NotificationService) ListEvents(ctx context.Context, userID int64, limit int) ([]domain.NotificationEvent, error) {
+	return s.repo.ListLatestEvents(ctx, userID, limit)
 }
 
 func (s *NotificationService) Evaluate(ctx context.Context, event domain.SignalEvent) error {
@@ -79,6 +79,9 @@ func (s *NotificationService) Evaluate(ctx context.Context, event domain.SignalE
 }
 
 func (s *NotificationService) matchRule(rule domain.NotificationRule, event domain.SignalEvent) bool {
+	if event.UserID != 0 && rule.UserID != event.UserID {
+		return false
+	}
 	if rule.EventType != event.EventType {
 		return false
 	}
