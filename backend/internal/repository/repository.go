@@ -26,6 +26,15 @@ type TinkoffCredentialRepository interface {
 	Upsert(ctx context.Context, cred domain.UserTinkoffCredential) error
 	GetByUserID(ctx context.Context, userID int64) (domain.UserTinkoffCredential, error)
 	Delete(ctx context.Context, userID int64) error
+	CreateBrokerConnection(ctx context.Context, connection domain.BrokerConnection) (domain.BrokerConnection, error)
+	UpdateBrokerConnection(ctx context.Context, connection domain.BrokerConnection) (domain.BrokerConnection, error)
+	ListBrokerConnections(ctx context.Context, userID int64) ([]domain.BrokerConnection, error)
+	GetBrokerConnection(ctx context.Context, userID int64, connectionID int64) (domain.BrokerConnection, error)
+	GetActiveBrokerConnection(ctx context.Context, userID int64) (domain.BrokerConnection, error)
+	SetActiveBrokerConnection(ctx context.Context, userID int64, connectionID int64) error
+	DeleteBrokerConnection(ctx context.Context, userID int64, connectionID int64) error
+	SaveBrokerAccountSelection(ctx context.Context, selection domain.BrokerAccountSelection) error
+	GetBrokerAccountSelection(ctx context.Context, userID int64) (domain.BrokerAccountSelection, error)
 }
 
 type AssetRepository interface {

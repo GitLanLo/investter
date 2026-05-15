@@ -41,6 +41,7 @@ func NewRouter(cfg config.Config, deps Dependencies) http.Handler {
 	registerUserRoutes(protected, v1, deps.Container)
 	registerAssetRoutes(protected, v1, deps.Container)
 	registerInstrumentRoutes(protected, v1, deps.Container)
+	registerBrokerRoutes(protected, v1, deps.Container)
 	registerWatchlistRoutes(protected, v1, deps.Container)
 	registerAnalysisRoutes(protected, v1, deps.Container)
 	registerNotificationRoutes(protected, v1, deps.Container)
@@ -93,6 +94,25 @@ func registerInstrumentRoutes(mux *http.ServeMux, v1 string, c app.Container) {
 	mux.HandleFunc("GET "+v1+"/instruments/search", handlers.SearchInstruments(c))
 	mux.HandleFunc("GET "+v1+"/instruments/{uid}", handlers.GetInstrument(c))
 	mux.HandleFunc("POST "+v1+"/instruments/{uid}/asset", handlers.EnsureInstrumentAsset(c))
+}
+
+func registerBrokerRoutes(mux *http.ServeMux, v1 string, c app.Container) {
+	mux.HandleFunc("GET "+v1+"/broker/connections", handlers.ListBrokerConnections(c))
+	mux.HandleFunc("POST "+v1+"/broker/connections", handlers.CreateBrokerConnection(c))
+	mux.HandleFunc("PATCH "+v1+"/broker/connections/{id}/active", handlers.SetActiveBrokerConnection(c))
+	mux.HandleFunc("DELETE "+v1+"/broker/connections/{id}", handlers.DeleteBrokerConnection(c))
+	mux.HandleFunc("GET "+v1+"/broker/accounts", handlers.ListBrokerAccounts(c))
+	mux.HandleFunc("GET "+v1+"/broker/context", handlers.GetBrokerContext(c))
+	mux.HandleFunc("POST "+v1+"/broker/context", handlers.SaveBrokerContext(c))
+	mux.HandleFunc("GET "+v1+"/broker/portfolio", handlers.GetBrokerPortfolio(c))
+	mux.HandleFunc("GET "+v1+"/broker/positions", handlers.GetBrokerPositions(c))
+	mux.HandleFunc("GET "+v1+"/broker/operations", handlers.GetBrokerOperations(c))
+	mux.HandleFunc("GET "+v1+"/broker/orders", handlers.GetBrokerOrders(c))
+	mux.HandleFunc("POST "+v1+"/broker/orders", handlers.PostBrokerOrder(c))
+	mux.HandleFunc("GET "+v1+"/broker/orders/{order_id}", handlers.GetBrokerOrderState(c))
+	mux.HandleFunc("DELETE "+v1+"/broker/orders/{order_id}", handlers.CancelBrokerOrder(c))
+	mux.HandleFunc("POST "+v1+"/broker/sandbox/accounts", handlers.OpenBrokerSandboxAccount(c))
+	mux.HandleFunc("POST "+v1+"/broker/sandbox/pay-in", handlers.BrokerSandboxPayIn(c))
 }
 
 func registerWatchlistRoutes(mux *http.ServeMux, v1 string, c app.Container) {

@@ -119,7 +119,8 @@ export default function WatchlistPage() {
     const out = new Map<string, number>();
     rules.forEach((rule) => {
       if (rule.is_enabled && rule.ticker) {
-        out.set(rule.ticker, (out.get(rule.ticker) || 0) + 1);
+        const ticker = rule.ticker.toUpperCase();
+        out.set(ticker, (out.get(ticker) || 0) + 1);
       }
     });
     return out;
@@ -133,6 +134,17 @@ export default function WatchlistPage() {
     }
     return assets;
   }, [assets, viewMode, watchlist]);
+
+  const pricedAssetsCount = useMemo(() => {
+    let pricedCount = 0;
+
+    displayedAssets.forEach((asset) => {
+      const fresh = freshnessByAsset.get(asset.id);
+      if (fresh && fresh.last_price > 0) pricedCount += 1;
+    });
+
+    return pricedCount;
+  }, [displayedAssets, freshnessByAsset]);
 
   const fetchData = async () => {
     setError("");
@@ -256,11 +268,12 @@ export default function WatchlistPage() {
   }
 
   return (
-    <div className="page">
-      <header className="page-header">
+    <div className="page market-workspace-page">
+      <header className="page-header market-page-header">
         <div>
-          <p className="eyebrow">Рынок</p>
-          <h1>Инструменты</h1>
+          <p className="eyebrow">Рабочий список</p>
+          <h1>Котировки</h1>
+          <p className="page-lead">Поиск, состояние данных, уведомления и переход к сделкам собраны на одном экране.</p>
         </div>
         <div className="segmented-control" aria-label="Режим списка">
           <button type="button" className={viewMode === "watchlist" ? "active" : ""} onClick={() => setViewMode("watchlist")}>
@@ -280,156 +293,171 @@ export default function WatchlistPage() {
         </div>
       )}
 
-      <section className="panel search-panel">
-        <form onSubmit={handleSearch} className="search-form">
-          <div className="search-input">
-            <Search size={18} aria-hidden="true" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Найти через Tinkoff: SBER, GAZP, OZON..."
-            />
-          </div>
-          <button type="submit" className="btn primary" disabled={searching || !searchQuery.trim()}>
-            {searching ? "Ищем..." : "Найти"}
-          </button>
-        </form>
+      <div className="market-workspace-grid">
+        <aside className="market-side-panel">
+          <section className="panel search-panel market-search-panel">
+            <div className="panel-title-row compact-title-row">
+              <div>
+                <p className="eyebrow">T-Invest</p>
+                <h2>Найти бумагу</h2>
+              </div>
+              {searchResults.length > 0 && <span className="status-chip">{searchResults.length} найдено</span>}
+            </div>
 
-        {searchResults.length > 0 && (
-          <div className="search-results-list">
-            {searchResults.map((res) => {
-              const alreadyAdded = watchlistByInstrument.has(res.uid) || watchlistByInstrument.has(res.ticker.toUpperCase());
-              return (
-                <article key={res.uid} className="result-row">
-                  <div>
-                    <strong>{res.ticker}</strong>
-                    <span>{res.name}</span>
-                    <small>{res.class_code || res.exchange || res.instrument_type}</small>
-                  </div>
-                  <div className="row-actions">
-                    <button type="button" className="btn small secondary" onClick={() => openInstrument(res.uid)}>
-                      <ArrowUpRight size={15} aria-hidden="true" />
-                      Открыть
-                    </button>
-                    <button type="button" className="btn small primary" onClick={() => addToWatchlist(res.uid)} disabled={alreadyAdded}>
-                      {alreadyAdded ? <Check size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}
-                      {alreadyAdded ? "В списке" : "Добавить"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+            <form onSubmit={handleSearch} className="search-form market-search-form">
+              <div className="search-input">
+                <Search size={18} aria-hidden="true" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="SBER, GAZP, OZON..."
+                />
+              </div>
+              <button type="submit" className="btn primary" disabled={searching || !searchQuery.trim()}>
+                {searching ? "Ищем..." : "Найти"}
+              </button>
+            </form>
 
-      <section className="panel table-panel market-table-panel">
-        <div className="market-table-header">
-          <div>
-            <p className="eyebrow">{viewMode === "watchlist" ? "Ваш портфель мониторинга" : "Каталог всех бумаг"}</p>
-            <h2>{viewMode === "watchlist" ? "Отслеживаемые бумаги" : "Все инструменты"}</h2>
-          </div>
-          <span>{displayedAssets.length} позиций</span>
-        </div>
-        <div className="responsive-table">
-          <table className="data-table market-table">
-            <thead>
-              <tr>
-                <th>Инструмент</th>
-                <th>Цена</th>
-                <th>Изм. (24ч)</th>
-                <th>Мониторинг</th>
-                <th>Прогноз</th>
-                <th className="row-actions">Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayedAssets.map((asset) => {
-                const fresh = freshnessByAsset.get(asset.id);
-                const inWatchlist = watchlistByAsset.has(asset.id);
-                const activeAlerts = activeRulesByTicker.get(asset.ticker) || 0;
-
-                const price = fresh?.last_price || 0;
-                const change = fresh?.price_change || 0;
-                const prevPrice = price - change;
-                const changePct = prevPrice !== 0 ? (change / prevPrice) * 100 : 0;
-                const changeClass = change >= 0 ? "positive" : "negative";
-
-                return (
-                  <tr key={asset.id}>
-                    <td>
-                      <Link to={`/instruments/${asset.id}`} className="instrument-cell">
-                        <strong>{asset.ticker}</strong>
-                        <span>{asset.name}</span>
-                        <small>{marketLabel(asset)}</small>
-                      </Link>
-                    </td>
-                    <td>
-                      {fresh ? (
-                        fresh.last_price > 0 ? (
-                          <strong>{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 }).format(fresh.last_price)}</strong>
-                        ) : (
-                          <span className="muted">—</span>
-                        )
-                      ) : (
-                        <span className="loading-dots">...</span>
-                      )}
-                    </td>
-                    <td>
-                      {fresh ? (
-                        fresh.last_price > 0 ? (
-                          <em className={`change-pct ${fresh.price_change >= 0 ? "positive" : "negative"}`}>
-                            {fresh.price_change >= 0 ? "+" : ""}
-                            {((fresh.price_change / (fresh.last_price - fresh.price_change)) * 100).toFixed(2)}%
-                          </em>
-                        ) : (
-                          <span className="muted">—</span>
-                        )
-                      ) : (
-                        <span className="loading-dots">...</span>
-                      )}
-                    </td>
-                    <td>
-                      <Link to="/alerts" className={activeAlerts > 0 ? "status-chip success" : "status-chip"}>
-                        {activeAlerts > 0 ? `Активен (${activeAlerts})` : "Нет правил"}
-                      </Link>
-                    </td>
-                    <td className="forecast-cell">
-                      <button type="button" className="btn small primary table-action-button" onClick={() => runForecast(asset.id)} disabled={forecastingAsset === asset.id || !fresh?.data_fresh}>
-                        <BrainCircuit size={15} aria-hidden="true" />
-                        {forecastingAsset === asset.id ? "Счет..." : "Прогноз"}
-                      </button>
-                    </td>
-                    <td className="row-actions">
-                      <div className="table-actions">
-                        <Link className="btn small secondary table-action-button" to={`/instruments/${asset.id}`}>
+            {searchResults.length > 0 && (
+              <div className="search-results-list compact-search-results">
+                {searchResults.map((res) => {
+                  const alreadyAdded = watchlistByInstrument.has(res.uid) || watchlistByInstrument.has(res.ticker.toUpperCase());
+                  return (
+                    <article key={res.uid} className="result-row">
+                      <div>
+                        <strong>{res.ticker}</strong>
+                        <span>{res.name}</span>
+                        <small>{res.class_code || res.exchange || res.instrument_type}</small>
+                      </div>
+                      <div className="row-actions">
+                        <button type="button" className="btn small secondary" onClick={() => openInstrument(res.uid)}>
                           <ArrowUpRight size={15} aria-hidden="true" />
                           Открыть
-                        </Link>
-                        {inWatchlist ? (
-                          <button type="button" className="icon-button small danger-icon" onClick={() => removeFromWatchlist(asset.id)} aria-label="Убрать из списка">
-                            <Trash2 size={15} aria-hidden="true" />
-                          </button>
-                        ) : (
-                          <button type="button" className="icon-button small" onClick={() => addAssetToWatchlist(asset.id)} aria-label="Добавить в список">
-                            <Heart size={15} aria-hidden="true" />
-                          </button>
-                        )}
+                        </button>
+                        <button type="button" className="btn small primary" onClick={() => addToWatchlist(res.uid)} disabled={alreadyAdded}>
+                          {alreadyAdded ? <Check size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}
+                          {alreadyAdded ? "В списке" : "Добавить"}
+                        </button>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {displayedAssets.length === 0 && (
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </aside>
+
+        <section className="panel table-panel market-table-panel market-table-workspace">
+          <div className="market-table-header">
+            <div>
+              <p className="eyebrow">{viewMode === "watchlist" ? "Ваш портфель мониторинга" : "Каталог бумаг"}</p>
+              <h2>{viewMode === "watchlist" ? "Отслеживаемые бумаги" : "Все инструменты"}</h2>
+            </div>
+            <div className="market-table-meta">
+              <span>{displayedAssets.length} позиций</span>
+              <span>{pricedAssetsCount} с ценой</span>
+            </div>
+          </div>
+          <div className="responsive-table market-responsive-table">
+            <table className="data-table market-table">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="empty-cell">Нет бумаг в выбранном списке</td>
+                  <th>Инструмент</th>
+                  <th>Цена</th>
+                  <th>Изм. (24ч)</th>
+                  <th>Мониторинг</th>
+                  <th>Прогноз</th>
+                  <th className="row-actions">Действия</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {displayedAssets.map((asset) => {
+                  const fresh = freshnessByAsset.get(asset.id);
+                  const inWatchlist = watchlistByAsset.has(asset.id);
+                  const activeAlerts = activeRulesByTicker.get(asset.ticker.toUpperCase()) || 0;
+
+                  const price = fresh?.last_price || 0;
+                  const change = fresh?.price_change || 0;
+                  const prevPrice = price - change;
+                  const changePct = prevPrice !== 0 ? (change / prevPrice) * 100 : 0;
+                  const changeClass = change >= 0 ? "positive" : "negative";
+
+                  return (
+                    <tr key={asset.id}>
+                      <td>
+                        <Link to={`/instruments/${asset.id}`} className="instrument-cell">
+                          <strong>{asset.ticker}</strong>
+                          <span>{asset.name}</span>
+                          <small>{marketLabel(asset)}</small>
+                        </Link>
+                      </td>
+                      <td>
+                        {fresh ? (
+                          fresh.last_price > 0 ? (
+                            <strong>{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 }).format(fresh.last_price)}</strong>
+                          ) : (
+                            <span className="muted">—</span>
+                          )
+                        ) : (
+                          <span className="loading-dots">...</span>
+                        )}
+                      </td>
+                      <td>
+                        {fresh ? (
+                          fresh.last_price > 0 ? (
+                            <em className={`change-pct ${changeClass}`}>
+                              {change >= 0 ? "+" : ""}
+                              {changePct.toFixed(2)}%
+                            </em>
+                          ) : (
+                            <span className="muted">—</span>
+                          )
+                        ) : (
+                          <span className="loading-dots">...</span>
+                        )}
+                      </td>
+                      <td>
+                        <Link to="/alerts" className={activeAlerts > 0 ? "status-chip success" : "status-chip"}>
+                          {activeAlerts > 0 ? `Активен (${activeAlerts})` : "Нет правил"}
+                        </Link>
+                      </td>
+                      <td className="forecast-cell">
+                        <button type="button" className="btn small primary table-action-button" onClick={() => runForecast(asset.id)} disabled={forecastingAsset === asset.id || !fresh?.data_fresh}>
+                          <BrainCircuit size={15} aria-hidden="true" />
+                          {forecastingAsset === asset.id ? "Счет..." : "Прогноз"}
+                        </button>
+                      </td>
+                      <td className="row-actions">
+                        <div className="table-actions">
+                          <Link className="btn small secondary table-action-button" to={`/instruments/${asset.id}`}>
+                            <ArrowUpRight size={15} aria-hidden="true" />
+                            Открыть
+                          </Link>
+                          {inWatchlist ? (
+                            <button type="button" className="icon-button small danger-icon" onClick={() => removeFromWatchlist(asset.id)} aria-label="Убрать из списка">
+                              <Trash2 size={15} aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <button type="button" className="icon-button small" onClick={() => addAssetToWatchlist(asset.id)} aria-label="Добавить в список">
+                              <Heart size={15} aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {displayedAssets.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="empty-cell">Нет бумаг в выбранном списке</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

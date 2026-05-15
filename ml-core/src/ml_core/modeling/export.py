@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 import logging
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,11 @@ def export_to_onnx(model: nn.Module, input_shape: list[int], output_path: Path):
     )
     logger.info(f"Model exported to {output_path}")
 
-def export_to_torchscript(model: nn.Module, input_shape: list[int], output_path: Path):
+def export_to_torch_export(model: nn.Module, input_shape: list[int], output_path: Path):
     model.eval()
     dummy_input = torch.randn(1, *input_shape)
-    traced_model = torch.jit.trace(model, dummy_input)
-    traced_model.save(str(output_path))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="The tensor attributes self\\.gru\\._flat_weights.*", category=UserWarning)
+        exported_model = torch.export.export(model, (dummy_input,))
+    torch.export.save(exported_model, str(output_path))
     logger.info(f"Model exported to {output_path}")

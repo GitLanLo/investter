@@ -1,9 +1,16 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
+)
+
+const (
+	defaultJWTSecret     = "super-secret-key"
+	defaultEncryptionKey = "0123456789abcdef0123456789abcdef"
 )
 
 type Config struct {
@@ -59,8 +66,8 @@ func Load() Config {
 		TinkoffInvestToken:         getEnv("TINKOFF_INVEST_TOKEN", ""),
 		TinkoffInvestTarget:        getEnv("TINKOFF_INVEST_TARGET", "prod"),
 		TinkoffCACertFile:          getEnv("TINKOFF_CA_CERT_FILE", ""),
-		JWTSecret:                  getEnv("JWT_SECRET", "super-secret-key"),
-		EncryptionKey:              getEnv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef"), // 32 bytes for AES-256
+		JWTSecret:                  getEnv("JWT_SECRET", defaultJWTSecret),
+		EncryptionKey:              getEnv("ENCRYPTION_KEY", defaultEncryptionKey), // 32 bytes for AES-256
 
 		WatchlistRefreshSchedulerEnabled: getEnvBool("WATCHLIST_REFRESH_SCHEDULER_ENABLED", true),
 		WatchlistRefreshInterval:         getEnvDuration("WATCHLIST_REFRESH_INTERVAL", 1*time.Minute),
@@ -72,6 +79,22 @@ func Load() Config {
 
 func (c Config) HTTPAddress() string {
 	return c.BackendHost + ":" + c.BackendPort
+}
+
+func (c Config) Validate() error {
+	if len(c.EncryptionKey) != 32 {
+		return fmt.Errorf("ENCRYPTION_KEY must be 32 bytes for AES-256, got %d", len(c.EncryptionKey))
+	}
+	if c.AppEnv == "dev" || c.AppEnv == "test" {
+		return nil
+	}
+	if c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret {
+		return errors.New("JWT_SECRET must be set to a non-default value outside dev/test")
+	}
+	if c.EncryptionKey == defaultEncryptionKey {
+		return errors.New("ENCRYPTION_KEY must be set to a non-default value outside dev/test")
+	}
+	return nil
 }
 
 func (c Config) PostgresDSN() string {

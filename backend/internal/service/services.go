@@ -15,6 +15,19 @@ type InstrumentService interface {
 	IsMarketOpen(ctx context.Context, token string, exchange string) (bool, error)
 }
 
+type BrokerClient interface {
+	GetAccounts(ctx context.Context, token string) ([]domain.BrokerAccount, error)
+	GetPortfolio(ctx context.Context, token string, accountID string) (domain.BrokerPortfolio, error)
+	GetPositions(ctx context.Context, token string, accountID string) (domain.BrokerPositions, error)
+	GetOperationsByCursor(ctx context.Context, token string, request domain.BrokerOperationsRequest) (domain.BrokerOperationsPage, error)
+	GetOrders(ctx context.Context, token string, accountID string) ([]domain.BrokerOrder, error)
+	PostOrder(ctx context.Context, token string, request domain.BrokerPlaceOrderRequest) (domain.BrokerOrder, error)
+	CancelOrder(ctx context.Context, token string, accountID string, orderID string) (domain.BrokerCancelOrderResult, error)
+	GetOrderState(ctx context.Context, token string, accountID string, orderID string) (domain.BrokerOrder, error)
+	OpenSandboxAccount(ctx context.Context, token string) (string, error)
+	SandboxPayIn(ctx context.Context, token string, accountID string, amount domain.MoneyValue) (domain.BrokerSandboxPayInResult, error)
+}
+
 type SandboxAwareInstrumentService interface {
 	WithSandboxTarget(isSandbox bool) InstrumentService
 }

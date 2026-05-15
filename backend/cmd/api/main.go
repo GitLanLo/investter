@@ -21,6 +21,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -67,7 +70,7 @@ func main() {
 			log.Default(),
 		).Start(rootCtx)
 	}
-	if cfg.WatchlistRefreshSchedulerEnabled && container.Services.WatchlistRefresh != nil {
+	if cfg.WatchlistRefreshSchedulerEnabled && container.Services.WatchlistRefresh != nil && cfg.TinkoffInvestToken != "" {
 		service.NewWatchlistRefreshScheduler(
 			container.Services.WatchlistRefresh,
 			cfg.WatchlistRefreshInterval,
@@ -75,6 +78,8 @@ func main() {
 			log.Default(),
 		).Start(rootCtx)
 		log.Printf("watchlist refresh scheduler enabled (interval=%s, limit=%d)", cfg.WatchlistRefreshInterval, cfg.WatchlistRefreshLimit)
+	} else if cfg.WatchlistRefreshSchedulerEnabled && cfg.TinkoffInvestToken == "" {
+		log.Printf("watchlist refresh scheduler disabled: TINKOFF_INVEST_TOKEN is not configured")
 	}
 	if cfg.WatchlistSignalSchedulerEnabled && container.Services.WatchlistRefresh != nil {
 		service.NewWatchlistSignalScheduler(

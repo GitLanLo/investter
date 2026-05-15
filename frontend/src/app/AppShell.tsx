@@ -1,4 +1,4 @@
-import { BarChart3, Bell, KeyRound, LineChart, LogOut, Menu, Settings2, UserCircle } from "lucide-react";
+import { BarChart3, Bell, KeyRound, LineChart, LogOut, Settings2, WalletCards } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
@@ -6,8 +6,9 @@ import { api } from "../shared/api/client";
 
 const navItems = [
   { to: "/watchlist", label: "Котировки", icon: LineChart },
+  { to: "/broker", label: "Счета", icon: WalletCards },
   { to: "/alerts", label: "Уведомления", icon: Bell },
-  { to: "/settings/tinkoff", label: "Tinkoff", icon: KeyRound },
+  { to: "/settings/tinkoff", label: "T-Invest API", icon: KeyRound },
 ];
 
 const adminNavItem = { to: "/admin", label: "Admin ML", icon: BarChart3 };
@@ -45,8 +46,8 @@ export function AppShell() {
   const userInitial = me?.email ? me.email.charAt(0).toUpperCase() : "U";
 
   return (
-    <div className="app-shell">
-      <header className="app-topbar" style={isInstrumentPage ? { borderBottom: "none" } : {}}>
+    <div className={`app-shell ${isInstrumentPage ? "chart-shell" : "workbench-shell"}`}>
+      <header className={`app-topbar ${isInstrumentPage ? "chart-topbar" : "app-sidebar"}`} style={isInstrumentPage ? { borderBottom: "none" } : {}}>
         {!isInstrumentPage && (
           <div className="brand">
             <div className="brand-mark">
@@ -78,6 +79,12 @@ export function AppShell() {
         <div className="profile-menu">
           <button type="button" className="profile-menu-button styled-profile-button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-label="Открыть профиль">
             <span className="profile-avatar">{userInitial}</span>
+            {!isInstrumentPage && (
+              <span className="profile-label">
+                <strong>{me?.email || "Пользователь"}</strong>
+                <small>{me?.role || "user"}</small>
+              </span>
+            )}
           </button>
           {profileOpen && (
             <div className="profile-dropdown">
@@ -103,10 +110,6 @@ export function AppShell() {
 
               <nav className="profile-nav">
                 <div className="profile-nav-header">Аккаунт</div>
-                <Link to="/profile" className="profile-link" onClick={() => setProfileOpen(false)}>
-                  <UserCircle size={17} aria-hidden="true" />
-                  <span>Профиль</span>
-                </Link>
                 <button type="button" onClick={handleLogout} className="profile-link logout-button">
                   <LogOut size={17} aria-hidden="true" />
                   <span>Выход</span>

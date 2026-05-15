@@ -1,6 +1,6 @@
 # backend
 
-Backend foundation для Sprint 1.
+Backend-сервис для REST API, фоновых задач, работы с PostgreSQL и публикации ML-сигналов.
 
 ## Текущее состояние
 

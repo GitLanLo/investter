@@ -15,7 +15,7 @@ from sklearn.metrics import f1_score
 
 from ml_core.training.sequence_models import GRUSequenceModel, TemporalCNNModel
 from ml_core.modeling.manifest import ModelManifest
-from ml_core.modeling.export import export_to_onnx, export_to_torchscript
+from ml_core.modeling.export import export_to_onnx, export_to_torch_export
 
 logger = logging.getLogger(__name__)
 
@@ -245,10 +245,10 @@ def train_neural_sequence(config: NeuralTrainingConfig):
         export_format = "onnx"
         model_artifact_path = "model.onnx"
     except Exception as e:
-        logger.warning(f"ONNX export failed: {e}, falling back to torchscript")
-        export_to_torchscript(model, [config.window_bars, feature_count], config.output_root / "model.pt")
-        export_format = "torchscript"
-        model_artifact_path = "model.pt"
+        logger.warning(f"ONNX export failed: {e}, falling back to torch.export")
+        export_to_torch_export(model, [config.window_bars, feature_count], config.output_root / "model.pt2")
+        export_format = "torch_export"
+        model_artifact_path = "model.pt2"
 
     # Final evaluation and saving predictions
     test_metrics = {}

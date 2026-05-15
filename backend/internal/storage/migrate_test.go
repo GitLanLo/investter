@@ -19,8 +19,11 @@ func TestMigrateAppliesPendingMigration(t *testing.T) {
 	mock.ExpectQuery("SELECT version FROM schema_migrations").
 		WillReturnRows(sqlmock.NewRows([]string{"version"}))
 
-	// Expect migrations 001 to 016
-	for i := 1; i <= 16; i++ {
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
+	}
+	for range migrations {
 		mock.ExpectBegin()
 		mock.ExpectExec(".*").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("INSERT INTO schema_migrations").WillReturnResult(sqlmock.NewResult(1, 1))
@@ -46,16 +49,12 @@ func TestMigrateSkipsAppliedMigration(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	rows := sqlmock.NewRows([]string{"version"})
-	applied := []string{
-		"001_init", "002_policy_validation_runs", "003_signal_policy_snapshot",
-		"004_signal_outcomes", "005_instrument_catalog", "006_add_model_version_to_policy_validation_runs",
-		"007_signal_events", "008_notifications", "009_policy_promotion_log",
-		"010_users", "011_tinkoff_credentials", "012_user_scoped_data",
-		"013_refresh_tokens", "014_fix_notification_rules_v2_user_id", "015_fix_signal_events_user_id",
-		"016_user_access_control",
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
 	}
-	for _, id := range applied {
-		rows.AddRow(id)
+	for _, migration := range migrations {
+		rows.AddRow(migration.ID)
 	}
 
 	mock.ExpectQuery("SELECT version FROM schema_migrations").WillReturnRows(rows)

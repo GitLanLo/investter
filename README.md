@@ -88,9 +88,11 @@ Web-система анализа рынка ценных бумаг с испо
 ## Документация
 
 - [План разработки (V2)](DEVELOPMENT_PLAN_V2.md)
+- [Индекс документации](docs/README.md)
 - [Архитектура системы](docs/architecture/overview.md)
 - [API Контракт (V1)](docs/contracts/api_v1.md)
-- [ML Исследования](docs/ml/baseline_report_sprint8.md)
+- [ML Objective](docs/ml/ml_objective_v1.md)
+- [Research Protocol](docs/ml/research_protocol_v1.md)
 
 ## Автор
 ВКР: Веб-система анализа рынка ценных бумаг.

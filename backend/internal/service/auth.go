@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -165,8 +166,14 @@ func (s *AuthService) ValidateTokenClaims(tokenString string) (AuthClaims, error
 		return AuthClaims{}, ErrUnauthorized
 	}
 
-	userID := int64(claims["sub"].(float64))
-	email := claims["email"].(string)
+	userID, ok := parseInt64Claim(claims["sub"])
+	if !ok {
+		return AuthClaims{}, ErrUnauthorized
+	}
+	email, ok := claims["email"].(string)
+	if !ok || email == "" {
+		return AuthClaims{}, ErrUnauthorized
+	}
 	role, _ := claims["role"].(string)
 	if role == "" {
 		role = domain.UserRoleUser
@@ -174,6 +181,28 @@ func (s *AuthService) ValidateTokenClaims(tokenString string) (AuthClaims, error
 	permissions := parsePermissionsClaim(claims["permissions"])
 
 	return AuthClaims{UserID: userID, Email: email, Role: role, Permissions: permissions}, nil
+}
+
+func parseInt64Claim(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if v < 0 || v != float64(int64(v)) {
+			return 0, false
+		}
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
 }
 
 func (s *AuthService) ListUsers(ctx context.Context) ([]domain.User, error) {

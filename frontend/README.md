@@ -1,6 +1,6 @@
 # frontend
 
-Frontend workspace для Sprint 2 operator GUI.
+Frontend workspace для операторского интерфейса системы анализа рынка.
 
 ## Что есть сейчас
 
@@ -38,7 +38,7 @@ npm run build
 
 - `VITE_API_BASE_URL` — базовый URL backend API, по умолчанию `http://localhost:8080`.
 
-## Sprint 2 scope
+## Текущий scope
 
 - operator GUI работает поверх реального backend API;
 - chart/workbench уже связан с ML artifact layer и signal history;

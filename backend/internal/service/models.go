@@ -157,7 +157,7 @@ func LoadManifest(path string) (domain.ModelManifest, error) {
 	}
 
 	// Reporting runtime status
-	if manifest.ExportFormat == "onnx" || manifest.ExportFormat == "torchscript" {
+	if manifest.ExportFormat == "onnx" || manifest.ExportFormat == "torchscript" || manifest.ExportFormat == "torch_export" {
 		// Currently backend does not have native inference for these
 		manifest.RuntimeStatus = RuntimeStatusMetadataOnly
 	} else if manifest.ExportFormat == "joblib" || manifest.ExportFormat == "pkl" || manifest.ExportFormat == "stub" {

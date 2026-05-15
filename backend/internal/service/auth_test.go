@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"invest/backend/internal/repository/postgres"
 )
@@ -83,5 +84,22 @@ func TestAuthService_Login(t *testing.T) {
 
 	if userID != 1 || userEmail != email {
 		t.Errorf("token validation failed: %d, %s", userID, userEmail)
+	}
+}
+
+func TestAuthService_ValidateTokenClaimsRejectsMalformedClaims(t *testing.T) {
+	svc := NewAuthService(nil, nil, "secret")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":   "not-a-number",
+		"email": "test@example.com",
+		"exp":   time.Now().Add(time.Minute).Unix(),
+	})
+	signed, err := token.SignedString([]byte("secret"))
+	if err != nil {
+		t.Fatalf("SignedString failed: %v", err)
+	}
+
+	if _, err := svc.ValidateTokenClaims(signed); err == nil {
+		t.Fatal("expected malformed token claims to be rejected")
 	}
 }

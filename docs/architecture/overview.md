@@ -2,7 +2,7 @@
 
 ## Цель
 
-Зафиксировать рабочую архитектуру после Sprint 2 и границы модулей.
+Зафиксировать рабочую архитектуру системы и границы модулей.
 
 ## Контуры системы
 
@@ -33,10 +33,10 @@
 - уведомления срабатывают только на actionable signals;
 - frontend показывает и итоговый статус, и вероятностный breakdown на detail page.
 
-## Что считается готовым по итогам Sprint 2
+## Текущая рабочая конфигурация
 
 - интерактивный operator GUI поверх реального backend API;
 - signal history по активу и latest signal tape;
 - ML artifact overview и document browser;
-- Sprint 2 research stack: ablation, walk-forward, production gate, calibration audit;
+- research stack: ablation, walk-forward, production gate, calibration audit;
 - рабочий вертикальный срез `ml-core -> backend -> frontend`.

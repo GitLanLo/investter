@@ -3,6 +3,7 @@ import LoginPage from "../pages/LoginPage";
 import RegisterPage from "../pages/RegisterPage";
 import WatchlistPage from "../pages/WatchlistPage";
 import SettingsTinkoffPage from "../pages/SettingsTinkoffPage";
+import BrokerPage from "../pages/BrokerPage";
 import InstrumentPage from "../pages/InstrumentPage";
 import AlertsPage from "../pages/AlertsPage";
 import AdminMLPage from "../pages/AdminMLPage";
@@ -31,6 +32,10 @@ export const router = createBrowserRouter([
           {
             path: "watchlist",
             element: <WatchlistPage />,
+          },
+          {
+            path: "broker",
+            element: <BrokerPage />,
           },
           {
             path: "settings/tinkoff",

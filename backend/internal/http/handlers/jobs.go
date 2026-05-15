@@ -105,6 +105,7 @@ func GetJobSchedulerStatus(cfg config.Config) http.HandlerFunc {
 
 func GetSchedulers(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		watchlistRefreshEnabled := cfg.WatchlistRefreshSchedulerEnabled && cfg.TinkoffInvestToken != ""
 		WriteJSON(w, http.StatusOK, SchedulersResponse{
 			Schedulers: []SchedulerInfoDTO{
 				{
@@ -116,7 +117,7 @@ func GetSchedulers(cfg config.Config) http.HandlerFunc {
 				},
 				{
 					Name:     "watchlist_data_refresh",
-					Enabled:  cfg.WatchlistRefreshSchedulerEnabled,
+					Enabled:  watchlistRefreshEnabled,
 					Interval: cfg.WatchlistRefreshInterval.String(),
 					Limit:    cfg.WatchlistRefreshLimit,
 				},

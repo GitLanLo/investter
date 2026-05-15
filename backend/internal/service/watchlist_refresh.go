@@ -150,6 +150,15 @@ func (s *WatchlistRefreshService) GetFreshness(ctx context.Context) (FreshnessSu
 		return FreshnessSummary{}, fmt.Errorf("assets list failed: %w", err)
 	}
 
+	return s.getFreshnessForAssets(ctx, assets, s.instruments, s.systemToken)
+}
+
+func (s *WatchlistRefreshService) getFreshnessForAssets(
+	ctx context.Context,
+	assets []domain.Asset,
+	instruments InstrumentService,
+	token string,
+) (FreshnessSummary, error) {
 	now := time.Now().UTC()
 	lookbackStart := now.Add(-30 * 24 * time.Hour)
 	summary := FreshnessSummary{
@@ -231,6 +240,13 @@ func (s *WatchlistRefreshService) GetFreshness(ctx context.Context) (FreshnessSu
 					fi.DataFresh = true
 				} else {
 					fi.StaleReason = "candle data older than " + dataFreshnessThreshold.String()
+					if instruments != nil && token != "" && a.Exchange != "" {
+						marketOpen, err := instruments.IsMarketOpen(ctx, token, a.Exchange)
+						if err == nil && !marketOpen {
+							fi.DataFresh = true
+							fi.StaleReason = "market closed; " + fi.StaleReason
+						}
+					}
 				}
 			} else {
 				fi.StaleReason = "no candle data available in any timeframe"
@@ -263,15 +279,22 @@ func (s *WatchlistRefreshService) GetFreshnessForUser(ctx context.Context, userI
 		return FreshnessSummary{}, fmt.Errorf("watchlist items failed: %w", err)
 	}
 
-	summary, err := s.GetFreshness(ctx)
-	if err != nil {
-		return summary, err
-	}
-
 	now := time.Now().UTC()
 	wlAssetIDs := make(map[string]struct{})
+	assets := make([]domain.Asset, 0, len(wlItems))
 	for _, item := range wlItems {
 		wlAssetIDs[item.AssetID] = struct{}{}
+		asset, err := s.assetRepo.GetByID(ctx, item.AssetID)
+		if err != nil {
+			return FreshnessSummary{}, fmt.Errorf("watchlist asset %s failed: %w", item.AssetID, err)
+		}
+		assets = append(assets, asset)
+	}
+
+	instruments, token := s.userInstrumentClient(ctx, userID)
+	summary, err := s.getFreshnessForAssets(ctx, assets, instruments, token)
+	if err != nil {
+		return summary, err
 	}
 
 	for i := range summary.Items {
@@ -290,15 +313,27 @@ func (s *WatchlistRefreshService) GetFreshnessForUser(ctx context.Context, userI
 			} else {
 				summary.StaleSignals++
 			}
-		} else {
-			if item.ModelSupported {
-				summary.WatchlistOnly++
-				summary.StaleSignals++
-			}
+		} else if _, ok := wlAssetIDs[item.AssetID]; ok {
+			summary.WatchlistOnly++
+			summary.StaleSignals++
 		}
 	}
 
 	return summary, nil
+}
+
+func (s *WatchlistRefreshService) userInstrumentClient(ctx context.Context, userID int64) (InstrumentService, string) {
+	if s == nil {
+		return nil, ""
+	}
+	if userID <= 0 || s.tinkoffCredentials == nil {
+		return s.instruments, s.systemToken
+	}
+	token, isSandbox, err := s.tinkoffCredentials.GetToken(ctx, userID)
+	if err != nil || token == "" {
+		return s.instruments, s.systemToken
+	}
+	return InstrumentServiceForSandbox(s.instruments, isSandbox), token
 }
 
 // WatchlistRefreshResult holds the results from a watchlist refresh job.
@@ -370,6 +405,10 @@ func (s *WatchlistRefreshService) RunWatchlistRefreshForUser(ctx context.Context
 
 func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID int64, limit int) (WatchlistRefreshResult, error) {
 	var assetIDs []string
+	instruments, token, err := s.refreshInstrumentClient(ctx, userID)
+	if err != nil {
+		return WatchlistRefreshResult{}, err
+	}
 
 	if userID > 0 {
 		watchlist, err := s.watchlistRepo.GetOrCreateByName(ctx, userID, "default")
@@ -434,8 +473,8 @@ func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID
 				res.timeframe = asset.Timeframe
 			}
 
-			if s.instruments != nil && asset.Ticker != "" {
-				inst, err := s.resolveAssetInstrument(assetCtx, asset)
+			if instruments != nil && asset.Ticker != "" {
+				inst, err := s.resolveAssetInstrument(assetCtx, instruments, token, asset)
 				if err != nil {
 					res.failed = true
 					return
@@ -450,7 +489,7 @@ func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID
 				}
 
 				if time.Since(from) > time.Minute {
-					newCands, err := s.instruments.GetCandles(assetCtx, s.systemToken, inst.UID, asset.Timeframe, from, time.Now().UTC())
+					newCands, err := instruments.GetCandles(assetCtx, token, inst.UID, asset.Timeframe, from, time.Now().UTC())
 					if err != nil {
 						res.failed = true
 						if s.logger != nil {
@@ -489,22 +528,47 @@ func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID
 		}
 	}
 
-	s.refreshFactorStatus(ctx, &result, factorTimeframes)
+	s.refreshFactorStatus(ctx, &result, factorTimeframes, instruments, token)
 
 	return result, nil
+}
+
+func (s *WatchlistRefreshService) refreshInstrumentClient(ctx context.Context, userID int64) (InstrumentService, string, error) {
+	if s == nil || s.instruments == nil {
+		return nil, "", nil
+	}
+	if userID <= 0 {
+		if s.systemToken == "" {
+			return nil, "", ErrTinkoffUnavailable
+		}
+		return s.instruments, s.systemToken, nil
+	}
+	if s.tinkoffCredentials == nil {
+		if s.systemToken == "" {
+			return nil, "", ErrTinkoffUnavailable
+		}
+		return s.instruments, s.systemToken, nil
+	}
+	token, isSandbox, err := s.tinkoffCredentials.GetToken(ctx, userID)
+	if err != nil || token == "" {
+		return nil, "", ErrTinkoffUnavailable
+	}
+	return InstrumentServiceForSandbox(s.instruments, isSandbox), token, nil
 }
 
 func (s *WatchlistRefreshService) refreshFactorStatus(
 	ctx context.Context,
 	result *WatchlistRefreshResult,
 	timeframes map[string]struct{},
+	instruments InstrumentService,
+	token string,
 ) {
 	if result == nil || s.marketData == nil {
 		return
 	}
 
 	now := time.Now().UTC()
-	s.refreshConfiguredFactors(ctx, result, timeframes, now)
+	s.refreshConfiguredFactors(ctx, result, timeframes, now, instruments, token)
 
 	for timeframe := range timeframes {
 		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -534,11 +598,19 @@ func (s *WatchlistRefreshService) refreshFactorStatus(
 	}
 }
 
-func (s *WatchlistRefreshService) resolveAssetInstrument(ctx context.Context, asset domain.Asset) (domain.TinkoffInstrument, error) {
-	if asset.InstrumentUID != "" {
-		return s.instruments.GetInstrumentByUID(ctx, s.systemToken, asset.InstrumentUID)
+func (s *WatchlistRefreshService) resolveAssetInstrument(
+	ctx context.Context,
+	instruments InstrumentService,
+	token string,
+	asset domain.Asset,
+) (domain.TinkoffInstrument, error) {
+	if instruments == nil {
+		return domain.TinkoffInstrument{}, ErrTinkoffUnavailable
 	}
-	items, err := s.instruments.FindInstrument(ctx, s.systemToken, asset.Ticker)
+	if asset.InstrumentUID != "" {
+		return instruments.GetInstrumentByUID(ctx, token, asset.InstrumentUID)
+	}
+	items, err := instruments.FindInstrument(ctx, token, asset.Ticker)
 	if err != nil {
 		return domain.TinkoffInstrument{}, err
 	}
@@ -582,8 +654,10 @@ func (s *WatchlistRefreshService) refreshConfiguredFactors(
 	result *WatchlistRefreshResult,
 	timeframes map[string]struct{},
 	now time.Time,
+	instruments InstrumentService,
+	token string,
 ) {
-	if s.instruments == nil || len(s.factorSpecs) == 0 {
+	if instruments == nil || token == "" || len(s.factorSpecs) == 0 {
 		return
 	}
 
@@ -622,13 +696,13 @@ func (s *WatchlistRefreshService) refreshConfiguredFactors(
 				return
 			}
 
-			inst, err := s.resolveFactorInstrument(factorCtx, sp)
+			inst, err := s.resolveFactorInstrument(factorCtx, instruments, token, sp)
 			if err != nil {
 				res.failed = true
 				return
 			}
 
-			candles, err := s.instruments.GetCandles(factorCtx, s.systemToken, inst.UID, sp.Timeframe, from, now)
+			candles, err := instruments.GetCandles(factorCtx, token, inst.UID, sp.Timeframe, from, now)
 			if err != nil {
 				res.failed = true
 				return
@@ -671,8 +745,16 @@ func (s *WatchlistRefreshService) refreshConfiguredFactors(
 	}
 }
 
-func (s *WatchlistRefreshService) resolveFactorInstrument(ctx context.Context, spec FactorRefreshSpec) (domain.TinkoffInstrument, error) {
-	items, err := s.instruments.FindInstrument(ctx, s.systemToken, spec.Ticker)
+func (s *WatchlistRefreshService) resolveFactorInstrument(
+	ctx context.Context,
+	instruments InstrumentService,
+	token string,
+	spec FactorRefreshSpec,
+) (domain.TinkoffInstrument, error) {
+	if instruments == nil {
+		return domain.TinkoffInstrument{}, ErrTinkoffUnavailable
+	}
+	items, err := instruments.FindInstrument(ctx, token, spec.Ticker)
 	if err != nil {
 		return domain.TinkoffInstrument{}, err
 	}
@@ -781,11 +863,11 @@ func (s *WatchlistRefreshService) doSignalRefresh(ctx context.Context, userID in
 	result := WatchlistSignalResult{TotalInstruments: len(assetIDs)}
 
 	type signalResult struct {
-		assetID          string
-		modelSupported   bool
-		signalGenerated  bool
-		failed           bool
-		skipped          bool
+		assetID         string
+		modelSupported  bool
+		signalGenerated bool
+		failed          bool
+		skipped         bool
 	}
 	resChan := make(chan signalResult, len(assetIDs))
 	sem := make(chan struct{}, 3) // Signal generation is heavier, so lower concurrency

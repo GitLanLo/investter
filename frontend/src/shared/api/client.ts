@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -11,7 +11,11 @@ async function readJson(response: Response) {
   if (!text) {
     return {};
   }
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: { code: "invalid_response", message: text } };
+  }
 }
 
 async function refreshAccessToken(): Promise<boolean> {

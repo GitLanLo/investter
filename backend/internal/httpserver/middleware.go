@@ -79,20 +79,20 @@ func authMiddleware(auth *service.AuthService, appEnv string) func(http.Handler)
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				handlers.WriteError(w, http.StatusUnauthorized, "unauthorized", "authorization bearer token is required", nil)
 				return
 			}
 
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				handlers.WriteError(w, http.StatusUnauthorized, "unauthorized", "authorization bearer token is invalid", nil)
 				return
 			}
 
 			token := parts[1]
 			claims, err := auth.ValidateTokenClaims(token)
 			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				handlers.WriteError(w, http.StatusUnauthorized, "unauthorized", "authorization bearer token is invalid", nil)
 				return
 			}
 

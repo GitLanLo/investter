@@ -56,6 +56,8 @@ interface ChartProps {
   inWatchlist?: boolean;
   onToggleWatchlist?: () => void;
   onCreateAlert?: () => void;
+  onBuyInstrument?: () => void;
+  buyInstrumentDisabled?: boolean;
   alerts?: Array<{ id: number; condition: string; action: string; active: boolean }>;
   onDeleteAlert?: (id: number) => void;
   watchlist?: Array<{ assetId: string; ticker: string; lastPrice: number; priceChange: number }>;
@@ -177,6 +179,8 @@ export const Chart: React.FC<ChartProps> = ({
   inWatchlist,
   onToggleWatchlist,
   onCreateAlert,
+  onBuyInstrument,
+  buyInstrumentDisabled = false,
   alerts = [],
   onDeleteAlert,
   watchlist = [],
@@ -583,6 +587,12 @@ export const Chart: React.FC<ChartProps> = ({
             <button type="button" onClick={() => chartRef.current?.scrollToRealTime(160)} title="К последней свече">
               <LocateFixed size={16} aria-hidden="true" />
             </button>
+            {onBuyInstrument && (
+              <button type="button" className="chart-toolbar-buy" onClick={onBuyInstrument} disabled={buyInstrumentDisabled} title="Купить инструмент">
+                <TrendingUp size={16} aria-hidden="true" />
+                <span>Купить</span>
+              </button>
+            )}
           </div>
 
           <div ref={chartContainerRef} className="chart-surface kline-chart-surface" />

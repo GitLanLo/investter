@@ -1,12 +1,12 @@
 # ml-core
 
-ML/data workspace для Sprint 1.
+ML/data workspace для ingest, feature engineering, research pipelines и подготовки model artifacts.
 
 ## Цель
 
 Построить новый ML-контур под задачи проекта, используя `investML` как reference baseline, а не как финальную ML-основу.
 
-## Основные направления Sprint 1
+## Основные направления
 
 - сформулировать ML objective;
 - спроектировать target engineering;
@@ -82,4 +82,4 @@ export TINKOFF_INVEST_TARGET=prod
 
 Tinkoff sync commands по умолчанию incremental/idempotent. Для полного backfill конкретного инструмента используйте `--no-incremental`; для контролируемого повторного захвата последних свечей используйте `--overlap-bars`.
 
-Sprint 1 baseline на реальных данных зафиксирован в `../docs/ml/baseline_report_sprint1.md`.
+Research workflow фиксируется через артефакты в `../artifacts/research` и model manifests в `../artifacts/models`.

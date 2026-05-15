@@ -11,6 +11,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
 
 	db, err := storage.Open(cfg)
 	if err != nil {

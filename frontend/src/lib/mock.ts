@@ -505,11 +505,11 @@ export const mockWorkspaceShellData: WorkspaceShellData = {
     staleSignals: 3,
     watchlistOnly: 2,
     items: [
-      { assetId: "SBER", ticker: "SBER", name: "Sberbank", dataFresh: true, signalFresh: true, modelSupported: true },
-      { assetId: "GAZP", ticker: "GAZP", name: "Gazprom", dataFresh: true, signalFresh: true, modelSupported: true },
-      { assetId: "LKOH", ticker: "LKOH", name: "Lukoil", dataFresh: true, signalFresh: false, staleReason: "no signals generated", modelSupported: true },
-      { assetId: "NVTK", ticker: "NVTK", name: "Novatek", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false },
-      { assetId: "MOEX", ticker: "MOEX", name: "Moscow Exchange", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false },
+      { assetId: "SBER", ticker: "SBER", name: "Sberbank", dataFresh: true, signalFresh: true, modelSupported: true, lastPrice: 310.4, priceChange: 1.8 },
+      { assetId: "GAZP", ticker: "GAZP", name: "Gazprom", dataFresh: true, signalFresh: true, modelSupported: true, lastPrice: 167.2, priceChange: -0.6 },
+      { assetId: "LKOH", ticker: "LKOH", name: "Lukoil", dataFresh: true, signalFresh: false, staleReason: "no signals generated", modelSupported: true, lastPrice: 7620, priceChange: 42 },
+      { assetId: "NVTK", ticker: "NVTK", name: "Novatek", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false, lastPrice: 1288.6, priceChange: 0 },
+      { assetId: "MOEX", ticker: "MOEX", name: "Moscow Exchange", dataFresh: false, signalFresh: false, staleReason: "no candle data available; watchlist-only (no ML signal)", modelSupported: false, lastPrice: 212.8, priceChange: 0 },
     ],
   },
   schedulers: [
