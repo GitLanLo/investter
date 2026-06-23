@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ActionType, dispose, init, type Chart as KLineChart, type KLineData } from "klinecharts";
+import { ActionType, dispose, init, registerOverlay, type Chart as KLineChart, type KLineData } from "klinecharts";
 import {
   Bell,
   BookOpen,
@@ -21,6 +21,7 @@ import {
   Plus,
   Ruler,
   Save,
+  Scan,
   Settings2,
   Sigma,
   SlidersHorizontal,
@@ -49,6 +50,7 @@ interface ChartProps {
   timeframeOptions?: Array<{ value: string; label: string }>;
   onTimeframeChange?: (value: string) => void;
   onRefresh?: () => void;
+  onLoadMore?: (timestamp: number) => Promise<ChartCandle[] | undefined>;
   refreshing?: boolean;
   storageKey?: string;
   instrumentLabel?: string;
@@ -107,12 +109,42 @@ const CHART_TYPE_OPTIONS: Array<{ value: ChartType; label: string; description: 
 ];
 const DRAWING_MENU_TOOLS = [
   { name: "crosshair", label: "Курсор", icon: Crosshair },
+  { name: "dateRange", label: "Диапазон", icon: Scan },
   { name: "segment", label: "Тренд", icon: LineChart },
   { name: "horizontalStraightLine", label: "Уровень", icon: Ruler },
   { name: "priceChannelLine", label: "Канал", icon: Layers },
   { name: "fibonacciLine", label: "Fibo", icon: SlidersHorizontal },
   { name: "simpleAnnotation", label: "Заметка", icon: PencilLine },
 ];
+
+registerOverlay({
+  name: "dateRange",
+  totalStep: 3,
+  needDefaultPointFigure: false,
+  needDefaultXAxisFigure: false,
+  needDefaultYAxisFigure: false,
+  createPointFigures: ({ coordinates, bounding }) => {
+    if (coordinates.length === 0) return [];
+    if (coordinates.length >= 2) {
+      const left = Math.min(coordinates[0].x, coordinates[1].x);
+      const right = Math.max(coordinates[0].x, coordinates[1].x);
+      return [
+        {
+          type: "rect",
+          attrs: { x: left, y: 0, width: right - left, height: bounding.height },
+          styles: { style: "fill", color: "rgba(47, 96, 119, 0.2)" },
+        },
+      ];
+    }
+    return [
+      {
+        type: "line",
+        attrs: { coordinates: [{ x: coordinates[0].x, y: 0 }, { x: coordinates[0].x, y: bounding.height }] },
+        styles: { color: "#2f6077", style: "dashed" },
+      },
+    ];
+  },
+});
 const RANGE_OPTIONS = [
   { label: "1M", days: 31 },
   { label: "3M", days: 92 },
@@ -186,12 +218,16 @@ export const Chart: React.FC<ChartProps> = ({
   watchlist = [],
   onSelectAsset,
   forecast,
+  onLoadMore,
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<KLineChart | null>(null);
   const indicatorPanesRef = useRef<Map<IndicatorName, string>>(new Map());
   const drawingsRef = useRef<Map<string, SavedDrawing>>(new Map());
+  const prevDataRef = useRef<KLineData[]>([]);
+  const onLoadMoreRef = useRef(onLoadMore);
   const [selected, setSelected] = useState<ChartCandle | null>(null);
+  const [selectedRange, setSelectedRange] = useState<{ start: number; end: number } | null>(null);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorName[]>(DEFAULT_INDICATORS);
   const [chartType, setChartType] = useState<ChartType>("candle_solid");
   const [openMenu, setOpenMenu] = useState<"chartType" | "timeframe" | "indicators" | "drawings" | null>(null);
@@ -202,6 +238,10 @@ export const Chart: React.FC<ChartProps> = ({
     setPortalTarget(document.getElementById("chart-topbar-portal"));
   }, []);
 
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+  }, [onLoadMore]);
+
   const klineData = useMemo(() => data.map(toKLineData), [data]);
   const chartStorageKey = `invest.chart.${storageKey}`;
   const fallbackSelected = data.length > 0 ? data[data.length - 1] : null;
@@ -211,6 +251,47 @@ export const Chart: React.FC<ChartProps> = ({
   const range = selectedCandle ? selectedCandle.high - selectedCandle.low : 0;
   const rangePct = selectedCandle && selectedCandle.low !== 0 ? (range / selectedCandle.low) * 100 : 0;
   const changeClass = change >= 0 ? "positive" : "negative";
+
+  const rangeStats = useMemo(() => {
+    if (!selectedRange) return null;
+    const inRange = data.filter((c) => {
+      const t = new Date(c.timestamp).getTime();
+      return t >= selectedRange.start && t <= selectedRange.end;
+    });
+    if (inRange.length === 0) return null;
+
+    const startCandle = inRange[0];
+    const endCandle = inRange[inRange.length - 1];
+    
+    let sumVolume = 0;
+    let maxHigh = -Infinity;
+    let minLow = Infinity;
+    
+    inRange.forEach(c => {
+      sumVolume += c.volume;
+      if (c.high > maxHigh) maxHigh = c.high;
+      if (c.low < minLow) minLow = c.low;
+    });
+    
+    const startOpen = startCandle.open;
+    const endClose = endCandle.close;
+    const priceChange = endClose - startOpen;
+    const priceChangePct = startOpen !== 0 ? (priceChange / startOpen) * 100 : 0;
+    
+    return {
+      barsCount: inRange.length,
+      startDate: startCandle.timestamp,
+      endDate: endCandle.timestamp,
+      sumVolume,
+      maxHigh,
+      minLow,
+      startOpen,
+      endClose,
+      priceChange,
+      priceChangePct,
+      changeClass: priceChange >= 0 ? "positive" : "negative"
+    };
+  }, [selectedRange, data]);
 
   const persistSettings = (indicators = activeIndicators, type = chartType) => {
     const settings: ChartSettings = {
@@ -238,6 +319,23 @@ export const Chart: React.FC<ChartProps> = ({
     }
   };
 
+  const updateRangeSelection = () => {
+    const ranges = Array.from(drawingsRef.current.values()).filter((d) => d.name === "dateRange");
+    if (ranges.length > 0) {
+      const last = ranges[ranges.length - 1];
+      if (last.points && last.points.length >= 2) {
+        const start = last.points[0].timestamp;
+        const end = last.points[1].timestamp;
+        if (start && end) {
+          setSelectedRange({ start: Math.min(start, end), end: Math.max(start, end) });
+          setSidePanel("data");
+          return;
+        }
+      }
+    }
+    setSelectedRange(null);
+  };
+
   const createDrawing = (name: string, points?: SavedDrawing["points"]) => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -256,6 +354,7 @@ export const Chart: React.FC<ChartProps> = ({
         if (event?.overlay?.id) {
           drawingsRef.current.set(event.overlay.id, { name: event.overlay.name, points: event.overlay.points || [] });
           persistSettings();
+          if (event.overlay.name === "dateRange") updateRangeSelection();
         }
         return true;
       },
@@ -263,6 +362,7 @@ export const Chart: React.FC<ChartProps> = ({
         if (event?.overlay?.id) {
           drawingsRef.current.set(event.overlay.id, { name: event.overlay.name, points: event.overlay.points || [] });
           persistSettings();
+          if (event.overlay.name === "dateRange") updateRangeSelection();
         }
         return true;
       },
@@ -270,6 +370,7 @@ export const Chart: React.FC<ChartProps> = ({
         if (event?.overlay?.id) {
           drawingsRef.current.delete(event.overlay.id);
           persistSettings();
+          if (event.overlay.name === "dateRange") updateRangeSelection();
         }
         return true;
       },
@@ -341,6 +442,18 @@ export const Chart: React.FC<ChartProps> = ({
     if (!chart) return;
     chartRef.current = chart;
     chart.setPriceVolumePrecision(4, 0);
+
+    chart.setLoadDataCallback(async (params) => {
+      if (params.type === "backward" && params.data && onLoadMoreRef.current) {
+        const olderCandles = await onLoadMoreRef.current(params.data.timestamp);
+        if (olderCandles && olderCandles.length > 0) {
+          params.callback(olderCandles.map(toKLineData), true);
+        } else {
+          params.callback([], false);
+        }
+      }
+    });
+
     const settings = loadSettings();
     setActiveIndicators(settings.indicators);
     setChartType(settings.chartType || "candle_solid");
@@ -377,8 +490,36 @@ export const Chart: React.FC<ChartProps> = ({
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    chart.applyNewData(klineData);
-    chart.scrollToRealTime();
+
+    const prev = prevDataRef.current;
+    const curr = klineData;
+
+    if (curr.length === 0) {
+      chart.applyNewData([]);
+    } else if (prev.length === 0) {
+      chart.applyNewData(curr);
+      chart.scrollToRealTime();
+    } else {
+      const prevFirst = prev[0];
+      const currFirst = curr[0];
+
+      if (currFirst.timestamp < prevFirst.timestamp) {
+        // Historical data was prepended
+        // klinecharts already applied this via setLoadDataCallback, so we do nothing here to preserve scroll.
+      } else if (currFirst.timestamp === prevFirst.timestamp) {
+        // Real-time append or update of the last few candles
+        const startIndex = Math.max(0, prev.length - 1);
+        for (let i = startIndex; i < curr.length; i++) {
+          chart.updateData(curr[i]);
+        }
+      } else {
+        // Completely different dataset (e.g. timeframe change)
+        chart.applyNewData(curr);
+        chart.scrollToRealTime();
+      }
+    }
+
+    prevDataRef.current = curr;
     setSelected(fallbackSelected);
   }, [fallbackSelected, klineData]);
 
@@ -433,6 +574,7 @@ export const Chart: React.FC<ChartProps> = ({
     chartRef.current?.removeOverlay({ groupId: DRAWING_GROUP_ID });
     drawingsRef.current.clear();
     persistSettings();
+    setSelectedRange(null);
   };
 
   const changeChartType = (value: ChartType) => {
@@ -715,14 +857,30 @@ export const Chart: React.FC<ChartProps> = ({
                 <span>{timeframe}</span>
               </div>
               <dl>
-                <div><dt>Дата</dt><dd>{formatDate(selectedCandle?.timestamp)}</dd></div>
-                <div><dt>Цена откр.</dt><dd>{formatPrice(selectedCandle?.open ?? NaN)}</dd></div>
-                <div><dt>Макс.</dt><dd>{formatPrice(selectedCandle?.high ?? NaN)}</dd></div>
-                <div><dt>Мин.</dt><dd>{formatPrice(selectedCandle?.low ?? NaN)}</dd></div>
-                <div><dt>Цена закрытия</dt><dd>{formatPrice(selectedCandle?.close ?? NaN)}</dd></div>
-                <div><dt>Изменение</dt><dd className={changeClass}>{change >= 0 ? "+" : ""}{formatPrice(change)} ({changePct.toFixed(2)}%)</dd></div>
-                <div><dt>Объем</dt><dd>{formatVolume(selectedCandle?.volume ?? 0)}</dd></div>
-                <div><dt>Диапазон</dt><dd>{formatPrice(range)} ({rangePct.toFixed(2)}%)</dd></div>
+                {rangeStats ? (
+                  <>
+                    <div className="range-highlight"><dt>Выделено</dt><dd>Свечей: {rangeStats.barsCount}</dd></div>
+                    <div><dt>Начало</dt><dd>{formatDate(rangeStats.startDate)}</dd></div>
+                    <div><dt>Конец</dt><dd>{formatDate(rangeStats.endDate)}</dd></div>
+                    <div><dt>Цена откр. (нач)</dt><dd>{formatPrice(rangeStats.startOpen)}</dd></div>
+                    <div><dt>Макс. в обл.</dt><dd>{formatPrice(rangeStats.maxHigh)}</dd></div>
+                    <div><dt>Мин. в обл.</dt><dd>{formatPrice(rangeStats.minLow)}</dd></div>
+                    <div><dt>Цена закр. (кон)</dt><dd>{formatPrice(rangeStats.endClose)}</dd></div>
+                    <div><dt>Изменение</dt><dd className={rangeStats.changeClass}>{rangeStats.priceChange >= 0 ? "+" : ""}{formatPrice(rangeStats.priceChange)} ({rangeStats.priceChangePct.toFixed(2)}%)</dd></div>
+                    <div><dt>Общий объем</dt><dd>{formatVolume(rangeStats.sumVolume)}</dd></div>
+                  </>
+                ) : (
+                  <>
+                    <div><dt>Дата</dt><dd>{formatDate(selectedCandle?.timestamp)}</dd></div>
+                    <div><dt>Цена откр.</dt><dd>{formatPrice(selectedCandle?.open ?? NaN)}</dd></div>
+                    <div><dt>Макс.</dt><dd>{formatPrice(selectedCandle?.high ?? NaN)}</dd></div>
+                    <div><dt>Мин.</dt><dd>{formatPrice(selectedCandle?.low ?? NaN)}</dd></div>
+                    <div><dt>Цена закрытия</dt><dd>{formatPrice(selectedCandle?.close ?? NaN)}</dd></div>
+                    <div><dt>Изменение</dt><dd className={changeClass}>{change >= 0 ? "+" : ""}{formatPrice(change)} ({changePct.toFixed(2)}%)</dd></div>
+                    <div><dt>Объем</dt><dd>{formatVolume(selectedCandle?.volume ?? 0)}</dd></div>
+                    <div><dt>Диапазон</dt><dd>{formatPrice(range)} ({rangePct.toFixed(2)}%)</dd></div>
+                  </>
+                )}
               </dl>
             </section>
           )}

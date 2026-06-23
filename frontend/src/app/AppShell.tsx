@@ -3,6 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { api } from "../shared/api/client";
+import { ToastProvider } from "../shared/ui/Toast";
+import { NotificationManager } from "./NotificationManager";
 
 const navItems = [
   { to: "/watchlist", label: "Котировки", icon: LineChart },
@@ -19,7 +21,7 @@ interface MeResponse {
   permissions?: string[];
 }
 
-export function AppShell() {
+function AppShellContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -124,5 +126,14 @@ export function AppShell() {
         <Outlet />
       </main>
     </div>
+  );
+}
+
+export function AppShell() {
+  return (
+    <ToastProvider>
+      <NotificationManager />
+      <AppShellContent />
+    </ToastProvider>
   );
 }

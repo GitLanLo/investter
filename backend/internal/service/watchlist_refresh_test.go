@@ -34,6 +34,7 @@ func newTestWatchlistRefreshService(
 		tinkoffCredentials,
 		"test-token",
 		log.Default(),
+		nil,
 	)
 }
 

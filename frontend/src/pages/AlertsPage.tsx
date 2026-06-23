@@ -39,6 +39,7 @@ interface RuleFormState {
   severity: string;
   direction: string;
   threshold: string;
+  operator?: string;
   cooldown_minutes: string;
   is_enabled: boolean;
   trigger_mode: string;
@@ -49,6 +50,7 @@ const supportedEventTypes = new Set([
   "classification_success",
   "inference_blocked_by_runtime",
   "policy_promotion",
+  "price_level",
 ]);
 
 const defaultRuleForm: RuleFormState = {
@@ -57,6 +59,7 @@ const defaultRuleForm: RuleFormState = {
   severity: "warning",
   direction: "",
   threshold: "0.65",
+  operator: ">",
   cooldown_minutes: "60",
   is_enabled: true,
   trigger_mode: "once",
@@ -76,6 +79,8 @@ function eventLabel(value: string) {
       return "Ошибка расчета";
     case "policy_promotion":
       return "Смена ML-политики";
+    case "price_level":
+      return "Достижение цены";
     case "price":
       return "Рыночная цена";
     case "volume":
@@ -113,6 +118,9 @@ function formatRuleValue(rule: NotificationRule) {
   if (rule.threshold === undefined || rule.threshold === null || Number.isNaN(rule.threshold)) {
     return "не задан";
   }
+  if (rule.event_type === "price_level") {
+    return `${rule.operator || ""} ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 }).format(rule.threshold)}`;
+  }
   if (rule.event_type === "decision_threshold_triggered" || rule.event_type === "classification_success") {
     return `${Math.round(rule.threshold * 100)}%`;
   }
@@ -140,6 +148,7 @@ function ruleToForm(rule: NotificationRule): RuleFormState {
     event_type: rule.event_type,
     severity: rule.severity || "warning",
     direction: rule.direction || "",
+    operator: rule.operator || ">",
     threshold: rule.threshold ? String(rule.threshold) : rule.event_type === "decision_threshold_triggered" ? "0.65" : "",
     cooldown_minutes: String(rule.cooldown_minutes ?? 60),
     is_enabled: rule.is_enabled,
@@ -191,10 +200,11 @@ export default function AlertsPage() {
   const updateForm = (patch: Partial<RuleFormState>) => {
     setRuleForm((current) => {
       const next = { ...current, ...patch };
-      if (patch.event_type === "decision_threshold_triggered" && !next.threshold) {
+      if (patch.event_type === "price_level" && !next.threshold) {
+        next.threshold = "";
+      } else if (patch.event_type === "decision_threshold_triggered" && !next.threshold) {
         next.threshold = "0.65";
-      }
-      if (patch.event_type && patch.event_type !== "decision_threshold_triggered") {
+      } else if (patch.event_type && patch.event_type !== "decision_threshold_triggered" && patch.event_type !== "price_level") {
         next.threshold = "";
       }
       return next;
@@ -208,14 +218,23 @@ export default function AlertsPage() {
       throw new Error("Cooldown должен быть целым числом минут");
     }
 
-    const threshold = eventType === "decision_threshold_triggered" ? normalizeProbability(ruleForm.threshold) : undefined;
-    if (eventType === "decision_threshold_triggered" && (!threshold || threshold > 1)) {
-      throw new Error("Порог вероятности должен быть от 0 до 1 или от 1 до 100%");
+    let threshold: number | undefined;
+    if (eventType === "decision_threshold_triggered") {
+      threshold = normalizeProbability(ruleForm.threshold);
+      if (!threshold || threshold > 1) {
+        throw new Error("Порог вероятности должен быть от 0 до 1 или от 1 до 100%");
+      }
+    } else if (eventType === "price_level") {
+      threshold = Number(ruleForm.threshold.replace(",", "."));
+      if (Number.isNaN(threshold) || threshold <= 0) {
+        throw new Error("Целевая цена должна быть положительным числом");
+      }
     }
 
     return {
       ticker: ruleForm.ticker.trim().toUpperCase() || undefined,
       event_type: eventType,
+      operator: eventType === "price_level" ? ruleForm.operator : undefined,
       severity: ruleForm.severity,
       direction: ruleForm.direction || undefined,
       threshold,
@@ -339,7 +358,7 @@ export default function AlertsPage() {
         <div className="panel-title-row">
           <div>
             <h2>{editingRuleID ? "Редактировать правило" : "Новое правило"}</h2>
-            <p>Исполняются ML-прогнозы, ошибки расчета и события смены политики.</p>
+            <p>Исполняются торговые уведомления, ML-прогнозы, ошибки расчета и события смены политики.</p>
           </div>
           <BellRing size={22} aria-hidden="true" />
         </div>
@@ -356,12 +375,28 @@ export default function AlertsPage() {
           <label className="form-group">
             <span>Событие</span>
             <select value={ruleForm.event_type} onChange={(event) => updateForm({ event_type: event.target.value })}>
-              <option value="decision_threshold_triggered">Сильный прогноз</option>
-              <option value="classification_success">Любой прогноз</option>
-              <option value="inference_blocked_by_runtime">Ошибка расчета</option>
-              <option value="policy_promotion">Смена ML-политики</option>
+              <optgroup label="Торговые">
+                <option value="price_level">Достижение цены</option>
+              </optgroup>
+              <optgroup label="ML Прогнозы">
+                <option value="decision_threshold_triggered">Сильный прогноз</option>
+                <option value="classification_success">Любой прогноз</option>
+                <option value="inference_blocked_by_runtime">Ошибка расчета</option>
+                <option value="policy_promotion">Смена ML-политики</option>
+              </optgroup>
             </select>
           </label>
+          {ruleForm.event_type === "price_level" && (
+            <label className="form-group">
+              <span>Условие</span>
+              <select value={ruleForm.operator} onChange={(event) => updateForm({ operator: event.target.value })}>
+                <option value=">">Цена выше (&gt;)</option>
+                <option value="<">Цена ниже (&lt;)</option>
+                <option value=">=">Цена выше или равна (&ge;)</option>
+                <option value="<=">Цена ниже или равна (&le;)</option>
+              </select>
+            </label>
+          )}
           <label className="form-group">
             <span>Направление</span>
             <select value={ruleForm.direction} onChange={(event) => updateForm({ direction: event.target.value })}>
@@ -371,12 +406,12 @@ export default function AlertsPage() {
             </select>
           </label>
           <label className="form-group">
-            <span>Порог</span>
+            <span>{ruleForm.event_type === "price_level" ? "Целевая цена" : "Порог"}</span>
             <input
               inputMode="decimal"
-              placeholder={ruleForm.event_type === "decision_threshold_triggered" ? "0.65 или 65" : "не требуется"}
+              placeholder={ruleForm.event_type === "price_level" ? "Например, 305.5" : (ruleForm.event_type === "decision_threshold_triggered" ? "0.65 или 65" : "не требуется")}
               value={ruleForm.threshold}
-              disabled={ruleForm.event_type !== "decision_threshold_triggered"}
+              disabled={!["decision_threshold_triggered", "price_level"].includes(ruleForm.event_type)}
               onChange={(event) => updateForm({ threshold: event.target.value })}
             />
           </label>

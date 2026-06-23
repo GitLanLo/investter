@@ -155,3 +155,57 @@ func (s *NotificationService) formatMessage(rule domain.NotificationRule, event 
 		return fmt.Sprintf("Signal event triggered: %s for %s", event.EventType, event.Ticker)
 	}
 }
+
+func (s *NotificationService) EvaluatePriceAlerts(ctx context.Context, ticker string, latestPrice float64) error {
+	rules, err := s.repo.ListActiveRules(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, rule := range rules {
+		if rule.EventType != "price_level" {
+			continue
+		}
+		if rule.Ticker != "" && rule.Ticker != ticker {
+			continue
+		}
+
+		triggered := false
+		switch rule.Operator {
+		case ">":
+			triggered = latestPrice > rule.Threshold
+		case "<":
+			triggered = latestPrice < rule.Threshold
+		case ">=":
+			triggered = latestPrice >= rule.Threshold
+		case "<=":
+			triggered = latestPrice <= rule.Threshold
+		}
+
+		if !triggered {
+			continue
+		}
+
+		// Use a mock SignalEvent just for cooldown checking
+		mockEvent := domain.SignalEvent{Ticker: ticker}
+		if s.isOnCooldown(ctx, rule, mockEvent) {
+			continue
+		}
+
+		notification := domain.NotificationEvent{
+			RuleID:           rule.ID,
+			EventType:        rule.EventType,
+			Severity:         rule.Severity,
+			Ticker:           ticker,
+			Message:          fmt.Sprintf("Цена для %s достигла целевого уровня: %.4f (Порог: %s %.4f)", ticker, latestPrice, rule.Operator, rule.Threshold),
+			Payload:          map[string]any{"price": latestPrice, "threshold": rule.Threshold, "operator": rule.Operator},
+			DeliveryStatus:   "delivered", // mock
+			DeliveryAttempts: 1,
+		}
+
+		if _, err := s.repo.CreateEvent(ctx, notification); err != nil {
+			return err
+		}
+	}
+	return nil
+}

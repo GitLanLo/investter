@@ -11,6 +11,7 @@ interface AlertModalProps {
 export const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSubmit, ticker }) => {
   const [eventType, setEventType] = useState("decision_threshold_triggered");
   const [threshold, setThreshold] = useState("0.65");
+  const [operator, setOperator] = useState(">");
   const [severity, setSeverity] = useState("warning");
   const [direction, setDirection] = useState("");
   const [cooldownMinutes, setCooldownMinutes] = useState("60");
@@ -19,12 +20,15 @@ export const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSubmi
 
   const handleSubmit = () => {
     const probability = Number(threshold.replace(",", "."));
-    const normalizedThreshold = probability > 1 && probability <= 100 ? probability / 100 : probability;
+    const normalizedThreshold = eventType === "decision_threshold_triggered" 
+      ? (probability > 1 && probability <= 100 ? probability / 100 : probability)
+      : probability;
 
     onSubmit({
       ticker,
       event_type: eventType,
-      threshold: eventType === "decision_threshold_triggered" ? normalizedThreshold : undefined,
+      operator: eventType === "price_level" ? operator : undefined,
+      threshold: ["decision_threshold_triggered", "price_level"].includes(eventType) ? normalizedThreshold : undefined,
       severity,
       direction: direction || undefined,
       trigger_mode: "once",
@@ -50,18 +54,37 @@ export const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSubmi
               onChange={(event) => {
                 const nextType = event.target.value;
                 setEventType(nextType);
-                if (nextType !== "decision_threshold_triggered") {
+                if (nextType === "price_level") {
+                  setThreshold("");
+                } else if (nextType !== "decision_threshold_triggered") {
                   setThreshold("");
                 } else if (!threshold) {
                   setThreshold("0.65");
                 }
               }}
             >
-              <option value="decision_threshold_triggered">Сильный ML-прогноз</option>
-              <option value="classification_success">Любой ML-прогноз</option>
-              <option value="inference_blocked_by_runtime">Ошибка расчета</option>
+              <optgroup label="Торговые">
+                <option value="price_level">Достижение цены</option>
+              </optgroup>
+              <optgroup label="ML Прогнозы">
+                <option value="decision_threshold_triggered">Сильный ML-прогноз</option>
+                <option value="classification_success">Любой ML-прогноз</option>
+                <option value="inference_blocked_by_runtime">Ошибка расчета</option>
+              </optgroup>
             </select>
           </div>
+
+          {eventType === "price_level" && (
+            <div className="alert-form-row">
+              <label>Условие</label>
+              <select value={operator} onChange={(event) => setOperator(event.target.value)}>
+                <option value=">">Цена выше (&gt;)</option>
+                <option value="<">Цена ниже (&lt;)</option>
+                <option value=">=">Цена выше или равна (&ge;)</option>
+                <option value="<=">Цена ниже или равна (&le;)</option>
+              </select>
+            </div>
+          )}
 
           <div className="alert-form-row">
             <label>Направление</label>
@@ -73,12 +96,12 @@ export const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSubmi
           </div>
 
           <div className="alert-form-row">
-            <label>Порог вероятности</label>
+            <label>{eventType === "price_level" ? "Целевая цена" : "Порог вероятности"}</label>
             <input
               inputMode="decimal"
-              placeholder={eventType === "decision_threshold_triggered" ? "0.65 или 65" : "не требуется"}
+              placeholder={eventType === "price_level" ? "Например, 305.5" : (eventType === "decision_threshold_triggered" ? "0.65 или 65" : "не требуется")}
               value={threshold}
-              disabled={eventType !== "decision_threshold_triggered"}
+              disabled={!["decision_threshold_triggered", "price_level"].includes(eventType)}
               onChange={(event) => setThreshold(event.target.value)}
             />
           </div>

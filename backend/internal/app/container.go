@@ -34,7 +34,7 @@ func NewContainer(db *sql.DB, cfg config.Config) Container {
 
 	watchlistRefresh := service.NewWatchlistRefreshService(
 		watchlistRepo, assetRepo, marketDataRepo, jobRepo, signalRepo,
-		svcs.Analysis, tinkoffAdapter, svcs.TinkoffCredentials, cfg.TinkoffInvestToken, log.Default(),
+		svcs.Analysis, tinkoffAdapter, svcs.TinkoffCredentials, cfg.TinkoffInvestToken, log.Default(), svcs.Notifications,
 	)
 	if factorSpecs, err := service.LoadUniverseFactorSpecs(cfg.MLUniverseConfigPath); err == nil {
 		watchlistRefresh = watchlistRefresh.WithFactorSpecs(factorSpecs)

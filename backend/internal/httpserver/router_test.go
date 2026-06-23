@@ -1105,7 +1105,7 @@ func TestSprint6Endpoints(t *testing.T) {
 
 	refreshSvc := service.NewWatchlistRefreshService(
 		watchlistRepo, assetRepo, &testMarketDataRepo{}, jobRepo, &testSignalRepo{},
-		nil, instruments, nil, "", nil,
+		nil, instruments, nil, "", nil, nil,
 	)
 
 	router := NewRouter(config.Config{AppEnv: "test"}, Dependencies{

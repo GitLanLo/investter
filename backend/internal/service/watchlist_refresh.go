@@ -31,6 +31,7 @@ type WatchlistRefreshService struct {
 	tinkoffCredentials *TinkoffCredentialService
 	systemToken        string
 	logger             *log.Logger
+	notifier           *NotificationService
 	factorSpecs        []FactorRefreshSpec
 }
 
@@ -45,6 +46,7 @@ func NewWatchlistRefreshService(
 	tinkoffCredentials *TinkoffCredentialService,
 	systemToken string,
 	logger *log.Logger,
+	notifier *NotificationService,
 ) *WatchlistRefreshService {
 	return &WatchlistRefreshService{
 		watchlistRepo:      watchlistRepo,
@@ -57,6 +59,7 @@ func NewWatchlistRefreshService(
 		tinkoffCredentials: tinkoffCredentials,
 		systemToken:        systemToken,
 		logger:             logger,
+		notifier:           notifier,
 	}
 }
 
@@ -502,6 +505,9 @@ func (s *WatchlistRefreshService) doWatchlistRefresh(ctx context.Context, userID
 						}
 						if err := s.marketData.AppendCandles(assetCtx, asset.Ticker, asset.Timeframe, newCands); err != nil {
 							res.failed = true
+						} else if s.notifier != nil {
+							latestCandle := newCands[len(newCands)-1]
+							_ = s.notifier.EvaluatePriceAlerts(context.Background(), asset.Ticker, latestCandle.Close)
 						}
 					}
 				}

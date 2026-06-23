@@ -46,7 +46,7 @@ func (r *SignalRunRepository) Create(ctx context.Context, run domain.SignalRun) 
 		RETURNING id, created_at
 	`,
 		run.AssetID,
-		run.UserID,
+		sql.NullInt64{Int64: run.UserID, Valid: run.UserID > 0},
 		run.ModelVersion,
 		run.AsOfTime,
 		run.SignalState,

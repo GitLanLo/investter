@@ -288,6 +288,26 @@ export default function InstrumentPage() {
     }
   };
 
+  const loadOlderCandles = useCallback(async (timestamp: number) => {
+    if (!id) return undefined;
+    try {
+      const date = new Date(timestamp);
+      const toParam = date.toISOString();
+      const params = `timeframe=${encodeURIComponent(timeframe)}`;
+      const res = await api.get<CandlesResponse>(`/api/v1/assets/${id}/candles?${params}&to=${toParam}&limit=800`);
+      if (res.items && res.items.length > 0) {
+        setCandles((prev) => {
+          const merged = [...res.items, ...prev];
+          return dedupeCandles(merged);
+        });
+        return res.items;
+      }
+    } catch (err) {
+      console.error("Failed to load older candles", err);
+    }
+    return undefined;
+  }, [id, timeframe]);
+
   const fetchData = useCallback(async (allowAutoRefresh = true) => {
     if (!id) return;
 
